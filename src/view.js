@@ -1,8 +1,8 @@
 function createHeadView(canvas) {
   const ctx=canvas.getContext('2d');
-  let mesh, guide, yaw=-.38, pitch=.12, center=[0,0,114], extent=275, last=null;
+  let mesh, guide, shell=null, section=null, yaw=-.38, pitch=.12, center=[0,0,114], extent=275, headExtent=275, last=null;
   const poses={circumference:[-.45,.32],width:[0,.02],length:[1.45,.10],height:[1.33,.04]};
-  function reset(){[yaw,pitch]=poses[guide]||[-.38,.12];draw();}
+  function reset(){[yaw,pitch]=section ? [section.axis===0?Math.PI/2:0,0] : poses[guide]||[-.38,.12];draw();}
   function draw(){
     if(!mesh)return;
     const w=canvas.clientWidth,h=canvas.clientHeight, dpr=Math.min(devicePixelRatio||1,2);
@@ -21,6 +21,11 @@ function createHeadView(canvas) {
       const p=axis?[i*unit,-5*unit,ground]:[-5*unit,i*unit,ground],q=axis?[i*unit,5*unit,ground]:[5*unit,i*unit,ground];
       line([p,q].map(a=>project([a[0]+center[0],a[1]+center[1],ground])),'#384950',1);
     }
+    if(section){
+      for(const segment of section.headLines) line(segment.map(project),'#9de6ce',2);
+      for(const segment of section.shellLines) line(segment.map(project),'#ffd084',2);
+      return;
+    }
     const points=mesh.vertices.map(project);
     const faces=mesh.faces.map(f=>{const [a,b,c]=f.map(i=>points[i]);return {a,b,c,z:a[2]+b[2]+c[2]};});
     faces.sort((a,b)=>b.z-a.z);
@@ -32,6 +37,14 @@ function createHeadView(canvas) {
       const color='rgb('+[64+145*shade,79+137*shade,80+131*shade].map(Math.round).join(',')+')';
       ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.lineTo(c[0],c[1]);ctx.closePath();
       ctx.fillStyle=color;ctx.fill();ctx.lineWidth=.55;ctx.strokeStyle=color;ctx.stroke();
+    }
+    if(shell){
+      const projected=shell.vertices.map(project);
+      ctx.fillStyle='rgba(247,178,83,.18)';ctx.strokeStyle='rgba(255,209,130,.20)';ctx.lineWidth=.55;
+      for(const face of shell.faces){
+        const [a,b,c]=face.map(i=>projected[i]);
+        ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.lineTo(c[0],c[1]);ctx.closePath();ctx.fill();ctx.stroke();
+      }
     }
     const g=mesh.guides?.[guide];if(!g)return;
     let overlay=g;
@@ -48,13 +61,20 @@ function createHeadView(canvas) {
     }else line(overlay.map(project),'#ffe099',3);
     if(overlay.length===2)for(const p of overlay){const [x,y]=project(p);ctx.beginPath();ctx.arc(x,y,4,0,2*Math.PI);ctx.fillStyle='#ffe099';ctx.fill();}
   }
-  canvas.addEventListener('pointerdown',e=>{last=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);});
+  canvas.addEventListener('pointerdown',e=>{if(section)return;last=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);});
   canvas.addEventListener('pointermove',e=>{if(!last)return;yaw+=(e.clientX-last[0])*.012;pitch=Math.max(-1.2,Math.min(1.2,pitch+(e.clientY-last[1])*.008));last=[e.clientX,e.clientY];draw();});
   canvas.addEventListener('lostpointercapture',()=>{last=null;});
   new ResizeObserver(draw).observe(canvas);
-  return {reset,show(m,g,turn=false){mesh=m;guide=g;
+  return {reset,fit(overlay,cut){const previous=section?.axis;shell=overlay;section=cut;
+    extent=headExtent;
+    const include=p=>{for(let i=0;i<3;i++)extent=Math.max(extent,Math.abs(p[i]-center[i])*2.12);};
+    if(overlay)overlay.vertices.forEach(include);
+    if(cut)for(const segment of cut.shellLines)segment.forEach(include);
+    if(previous!==section?.axis)reset();else draw();
+  },show(m,g,turn=false){mesh=m;guide=g;shell=null;section=null;
     if(m.mins){center=m.mins.map((v,i)=>(v+m.maxs[i])/2);extent=Math.max(...m.maxs.map((v,i)=>v-m.mins[i]))*1.12;}
-    else{center=[0,0,114];extent=Math.max(275,m.actual.height*1.04,m.actual.length*1.05,m.actual.width*1.05);}
+    else{center=[0,0,m.actual.height/2];extent=Math.max(m.actual.height*1.08,m.actual.length*1.12,m.actual.width*1.12);}
+    headExtent=extent;document.querySelector('.hud span').textContent='Drag to rotate';
     if(turn)reset();else draw();
   }};
 }

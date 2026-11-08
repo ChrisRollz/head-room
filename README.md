@@ -2,31 +2,25 @@
 
 # Head Room for OrcaSlicer
 
-Head Room 0.1.0 is a local development preview of the personal-head part of a cosplay helmet fitting plugin. It includes an original, low-detail procedural headform. The brow, eye sockets, nose and jaw are generic landmarks. The four measurements shape a reference mannequin.
+Create a personal reference head and try on cosplay helmets in OrcaSlicer. Head Room 0.2.0 works with measured heads and head scans. Saved heads from 0.1.0 open directly in the fitting workflow.
 
-## Try it
+## Install
 
-- Open `dist/HeadRoom.html` to try the same measurement screens in a desktop browser.
-- To install the public version, open the [Head Room listing](https://cloud.orcaslicer.com/app/plugins/plugin-hub/47a2a727-e5bd-4a1a-a51e-2cc40e8730f9) and choose **Subscribe**. In OrcaSlicer, sign in with the same account, open **File → Plugins**, click **Refresh**, and check **Activate** beside Head Room. Open the **Head Room** tab.
-- To test the published file locally, open **File → Plugins** in OrcaSlicer 2.5.0. Click the small arrow to the left of **Install plugin** and choose **Install local plugin**. Then click the newly labeled **Install local plugin** button to open the file picker. Select `dist/cloud/head_room_any.py`, check **Activate** beside Head Room, and open its tab.
-- Select **Make my head**. Enter the brow circumference, skull width above the ears, brow-to-back length and chin-to-crown height. The highlighted guide and head update as you enter each answer. Units may be mm, cm or inches.
-- Select **Save my head** to keep one profile. **Use my own STL** accepts an ASCII or binary STL in millimetres up to 32 MiB. The preview may sample large imports. Export preserves the original imported bytes.
-- **Export head STL** downloads the reference in the browser preview. In Orca it writes the file to the plugin's local storage and displays the path. Browser and Orca profiles are stored separately. The grid in the tab is a fitting view; use Orca's ordinary import if you want this reference in Prepare.
+- Open the [Head Room listing](https://cloud.orcaslicer.com/app/plugins/plugin-hub/47a2a727-e5bd-4a1a-a51e-2cc40e8730f9) and choose **Subscribe**. In OrcaSlicer, sign in with the same account, open **File → Plugins**, click **Refresh**, and check **Activate** beside Head Room.
+- To install a local build in OrcaSlicer 2.5.0, open **File → Plugins**, click the arrow to the left of **Install plugin**, choose **Install local plugin**, then click the newly labeled button. Select `dist/cloud/head_room_any.py` and activate it. Reuse that filename when updating to keep the same local plugin identity.
+- For a standalone browser preview, open `dist/HeadRoom.html`. The browser keeps its own saved head and downloads the fitted helmet.
+
+## Try on a helmet
+
+1. Choose **Make my head** for four guided measurements, or **Use my own STL** for a head scan in millimetres (up to 32 MiB). Save the head. Next time, choose **Use saved head**.
+2. Choose **Choose helmet STL**. Use a single assembled shell in millimetres, up to 96 MiB. The shell starts centered on the head. **Align helmet** turns it in quarter turns and moves it in millimetres. Line up the visor and chin before sizing.
+3. Compare the head and helmet in **3D**, **Side section** and **Front section**. The section lines show the actual head (mint) and shell (gold) triangles cut by the middle plane. Change the scale uniformly or by axis. To estimate a starting scale, enter padding per side and click **Estimate scale**. The estimate samples the first inner wall in both horizontal directions along each axis through the helmet center, and the inner crown above it. Open or ambiguous samples leave the scale unchanged. Check the visor, nose, jaw and entry opening yourself.
+4. Choose **Open fitted helmet in OrcaSlicer**. Only the fitted helmet goes to Orca, with all the original triangles. Orca may ask for permission to open it. On macOS it uses the normal open-document event. On Windows and Linux it launches a discoverable OrcaSlicer executable with the fitted STL, which may open another window. If the application cannot be opened, the page gives the path to the fitted file. Use **Head details** to export the mannequin separately if needed.
+
+The opening screen includes [Uncle Jessy’s printable cosplay calipers](https://www.printables.com/model/14099-cosplay-calipers/files). The face is an approximate mannequin. The plugin currently uses brow circumference, skull width, brow-to-back depth and chin-to-crown height. Ear-to-ear crown arc and nose projection are possible future refinements.
 
 ## Build
 
-Run `python3 build.py` to regenerate the browser preview, local plugin and Orca Cloud upload (`dist/cloud/head_room_any.py`). The listing icon is `dist/cloud/head-room-icon.png`. Run `node tests/geometry.cjs` for landmark and STL checks. There are no runtime downloads or third-party mesh assets. The generated brow loop uses the measured axes and circumference together; if the dimensions exceed the model's supported shape range, Review shows the achieved circumference.
+Run `python3 build.py` to regenerate the preview and plugin. Run `node tests/geometry.cjs` and `node tests/fit.cjs` for the geometry and STL checks. You may pass a local high-detail helmet STL to the second command to verify that export preserves every triangle. The Orca Cloud upload and icon are in `dist/cloud/`.
 
-## Next milestone
-
-Test a legitimately obtained Din Djarin helmet STL as a local fixture. Add helmet alignment around the eyes and brow; inspect cross-sections of the interior, derive uniform or independent-axis scale from the inside of the aligned shell, and preview optional padding in millimetres per side. Openings, missing interior surfaces and multipart shells need explicit handling before offering automatic scale for those cases. Pass only the accepted helmet to Prepare and verify its size after slicing. A review file can carry both meshes to Blender for local changes.
-
-Keep wearer profiles local. The open-source package can ship with an original test shell. External helmet meshes require separate redistribution rights.
-
-## Development references
-
-- [Orca Pages API](https://www.orcaslicer.com/wiki/developer_reference/plugin_development/api_reference/pages)
-- [Orca host API](https://github.com/OrcaSlicer/OrcaSlicer/wiki/host)
-- [Local plugins](https://www.orcaslicer.com/wiki/plugin_development/)
-
-Code and the procedural headform are available under the MIT license.
+Code and the original procedural headform are available under the MIT license. Wearer profiles stay local. Head Room has no runtime downloads and includes no third-party helmet files.

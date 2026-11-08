@@ -79,32 +79,37 @@ const HeadRoomGeometry = (() => {
     });
     return data;
   }
-  // Keep full original bytes for export. A bounded sample is only used for drawing imported scans.
-  function inspectSTL(buffer) {
+  // Stream the full file even when the on-screen preview uses fewer triangles.
+  function readSTL(buffer, visit) {
     const v=new DataView(buffer), n=buffer.byteLength>=84?v.getUint32(80,true):0;
-    const vertices=[],faces=[],mins=[Infinity,Infinity,Infinity],maxs=[-Infinity,-Infinity,-Infinity];
-    function take(p){p.forEach((x,d)=>{if(!Number.isFinite(x))throw Error('Invalid STL coordinate.');
-      mins[d]=Math.min(mins[d],x);maxs[d]=Math.max(maxs[d],x);});}
-    function add(points){const start=vertices.length;vertices.push(...points);faces.push([start,start+1,start+2]);}
     if(n>0&&84+50*n===buffer.byteLength){
-      const stride=Math.ceil(n/7000);
       for(let i=0;i<n;i++){
         const points=Array.from({length:3},(_,j)=>Array.from({length:3},(_,k)=>v.getFloat32(96+50*i+12*j+4*k,true)));
-        points.forEach(take);if(i%stride===0)add(points);
+        visit(points,i,n);
       }
-    }else{
-      const s=new TextDecoder().decode(buffer);
-      if(!/^\s*solid\b/i.test(s)||!/^\s*endsolid\b/im.test(s))throw Error('Choose a binary or ASCII STL file.');
-      const re=/\bvertex\s+(\S+)\s+(\S+)\s+(\S+)/gi;
-      const count=[...s.matchAll(/\bfacet\s+normal/gi)].length, stride=Math.max(1,Math.ceil(count/7000));
-      let m,tri=[],i=0;
-      while((m=re.exec(s))){const p=m.slice(1).map(Number);take(p);tri.push(p);
-        if(tri.length===3){if(i++%stride===0)add(tri);tri=[];}}
-      if(tri.length||i!==count)throw Error('Incomplete ASCII STL.');
+      return n;
     }
-    if(!faces.length||maxs.some((v,i)=>v<=mins[i]))throw Error('This STL has no three-dimensional surface.');
-    return {vertices,faces,mins,maxs,guides:{}};
+    const s=new TextDecoder().decode(buffer);
+    if(!/^\s*solid\b/i.test(s)||!/^\s*endsolid\b/im.test(s))throw Error('Choose a binary or ASCII STL file.');
+    const count=(s.match(/\bfacet\s+normal/gi)||[]).length;
+    const re=/\bvertex\s+(\S+)\s+(\S+)\s+(\S+)/gi;
+    let m,tri=[],i=0;
+    while((m=re.exec(s))){tri.push(m.slice(1).map(Number));if(tri.length===3){visit(tri,i++,count);tri=[];}}
+    if(tri.length||i!==count)throw Error('Incomplete ASCII STL.');
+    return count;
   }
-  return {defaults,generate,binarySTL,inspectSTL};
+  function inspectSTL(buffer) {
+    const vertices=[],faces=[],mins=[Infinity,Infinity,Infinity],maxs=[-Infinity,-Infinity,-Infinity];
+    const count=readSTL(buffer,(points,i,n)=>{
+      for(const p of points)for(let d=0;d<3;d++){
+        if(!Number.isFinite(p[d]))throw Error('Invalid STL coordinate.');
+        mins[d]=Math.min(mins[d],p[d]);maxs[d]=Math.max(maxs[d],p[d]);
+      }
+      if(i%Math.ceil(n/7000)===0){const j=vertices.length;vertices.push(...points);faces.push([j,j+1,j+2]);}
+    });
+    if(!count||maxs.some((v,i)=>v<=mins[i]))throw Error('This STL has no three-dimensional surface.');
+    return {vertices,faces,mins,maxs,count,guides:{}};
+  }
+  return {defaults,generate,binarySTL,inspectSTL,readSTL};
 })();
 if(typeof module!=='undefined'&&module.exports)module.exports=HeadRoomGeometry;
