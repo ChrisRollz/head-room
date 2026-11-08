@@ -7,7 +7,8 @@ Head Room 0.1.0 is a local development preview of the personal-head part of a co
 ## Try it
 
 - Open `dist/HeadRoom.html` to try the same measurement screens in a desktop browser.
-- In OrcaSlicer 2.5, open **Plugins**, choose **Install local plugin** from the **Browse plugins** dropdown, and select `dist/HeadRoom.py`. Activate **Head Room** and open its tab.
+- To install the public version, open the [Head Room listing](https://cloud.orcaslicer.com/app/plugins/plugin-hub/47a2a727-e5bd-4a1a-a51e-2cc40e8730f9) and choose **Subscribe**. In OrcaSlicer, sign in with the same account, open **File → Plugins**, click **Refresh**, and check **Activate** beside Head Room. Open the **Head Room** tab.
+- To test the published file locally, open **File → Plugins** in OrcaSlicer 2.5.0. Click the small arrow to the left of **Install plugin** and choose **Install local plugin**. Then click the newly labeled **Install local plugin** button to open the file picker. Select `dist/cloud/head_room_any.py`, check **Activate** beside Head Room, and open its tab.
 - Select **Make my head**. Enter the brow circumference, skull width above the ears, brow-to-back length and chin-to-crown height. The highlighted guide and head update as you enter each answer. Units may be mm, cm or inches.
 - Select **Save my head** to keep one profile. **Use my own STL** accepts an ASCII or binary STL in millimetres up to 32 MiB. The preview may sample large imports. Export preserves the original imported bytes.
 - **Export head STL** downloads the reference in the browser preview. In Orca it writes the file to the plugin's local storage and displays the path. Browser and Orca profiles are stored separately. The grid in the tab is a fitting view; use Orca's ordinary import if you want this reference in Prepare.
