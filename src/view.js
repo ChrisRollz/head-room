@@ -1,17 +1,17 @@
 function createHeadView(canvas) {
   const ctx=canvas.getContext('2d');
-  let mesh, guide, shell=null, section=null, yaw=-.38, pitch=.12, center=[0,0,114], extent=275, headExtent=275, last=null;
+  let mesh, guide, shell=null, section=null, yaw=-.38, pitch=.12, center=[0,0,114], extent=275, headExtent=275, last=null,zoom=1,pan=[0,0],panning=false;
   const poses={circumference:[-.45,.32],width:[0,.02],length:[1.45,.10],height:[1.33,.04]};
-  function reset(){[yaw,pitch]=section ? [section.axis===0?Math.PI/2:0,0] : poses[guide]||[-.38,.12];draw();}
+  function reset(){zoom=1;pan=[0,0];[yaw,pitch]=section ? [section.axis===0?Math.PI/2:0,0] : poses[guide]||[-.38,.12];draw();}
   function draw(){
     if(!mesh)return;
     const w=canvas.clientWidth,h=canvas.clientHeight, dpr=Math.min(devicePixelRatio||1,2);
     if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
-    const scale=Math.min(w*.82,h*.84)/extent, cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+    const scale=Math.min(w*.82,h*.84)*zoom/extent, cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
     function project(p){
       const x=p[0]-center[0],y=p[1]-center[1],z=p[2]-center[2],depth=y*cy+x*sy;
-      return [w/2+(x*cy-y*sy)*scale,h*.49-(z*cp+depth*sp)*scale,depth*cp-z*sp];
+      return [w/2+pan[0]+(x*cy-y*sy)*scale,h*.49+pan[1]-(z*cp+depth*sp)*scale,depth*cp-z*sp];
     }
     function line(points,color,width){
       ctx.beginPath();points.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke();
@@ -38,14 +38,6 @@ function createHeadView(canvas) {
       ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.lineTo(c[0],c[1]);ctx.closePath();
       ctx.fillStyle=color;ctx.fill();ctx.lineWidth=.55;ctx.strokeStyle=color;ctx.stroke();
     }
-    if(shell){
-      const projected=shell.vertices.map(project);
-      ctx.fillStyle='rgba(247,178,83,.18)';ctx.strokeStyle='rgba(255,209,130,.20)';ctx.lineWidth=.55;
-      for(const face of shell.faces){
-        const [a,b,c]=face.map(i=>projected[i]);
-        ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.lineTo(c[0],c[1]);ctx.closePath();ctx.fill();ctx.stroke();
-      }
-    }
     const g=mesh.guides?.[guide];if(!g)return;
     let overlay=g;
     if(guide==='height'){
@@ -61,15 +53,16 @@ function createHeadView(canvas) {
     }else line(overlay.map(project),'#ffe099',3);
     if(overlay.length===2)for(const p of overlay){const [x,y]=project(p);ctx.beginPath();ctx.arc(x,y,4,0,2*Math.PI);ctx.fillStyle='#ffe099';ctx.fill();}
   }
-  canvas.addEventListener('pointerdown',e=>{if(section)return;last=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);});
-  canvas.addEventListener('pointermove',e=>{if(!last)return;yaw+=(e.clientX-last[0])*.012;pitch=Math.max(-1.2,Math.min(1.2,pitch+(e.clientY-last[1])*.008));last=[e.clientX,e.clientY];draw();});
+  canvas.addEventListener('pointerdown',e=>{panning=e.shiftKey||e.button===1||e.button===2;if(section&&!panning)return;e.preventDefault();last=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);});
+  canvas.addEventListener('pointermove',e=>{if(!last)return;const dx=e.clientX-last[0],dy=e.clientY-last[1];
+    if(panning){pan[0]+=dx;pan[1]+=dy;}else{yaw+=dx*.012;pitch=Math.max(-1.2,Math.min(1.2,pitch+dy*.008));}
+    last=[e.clientX,e.clientY];draw();});
+  canvas.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.06,Math.min(30,zoom*Math.exp(-Math.sign(e.deltaY)*.12)));draw();},{passive:false});
+  canvas.addEventListener('contextmenu',e=>e.preventDefault());
   canvas.addEventListener('lostpointercapture',()=>{last=null;});
   new ResizeObserver(draw).observe(canvas);
   return {reset,fit(overlay,cut){const previous=section?.axis;shell=overlay;section=cut;
-    extent=headExtent;
-    const include=p=>{for(let i=0;i<3;i++)extent=Math.max(extent,Math.abs(p[i]-center[i])*2.12);};
-    if(overlay)overlay.vertices.forEach(include);
-    if(cut)for(const segment of cut.shellLines)segment.forEach(include);
+    extent=headExtent*1.4;
     if(previous!==section?.axis)reset();else draw();
   },show(m,g,turn=false){mesh=m;guide=g;shell=null;section=null;
     if(m.mins){center=m.mins.map((v,i)=>(v+m.maxs[i])/2);extent=Math.max(...m.maxs.map((v,i)=>v-m.mins[i]))*1.12;}

@@ -3,7 +3,7 @@
 # dependencies = []
 # [tool.orcaslicer.plugin]
 # name = "Head Room"
-# version = "0.2.1"
+# version = "0.3.0"
 # description = "Create a personal head, try on a cosplay helmet and open the fitted shell in OrcaSlicer."
 # ///
 import base64
@@ -181,7 +181,7 @@ class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
         except (ValueError, OSError, RuntimeError, TypeError, sqlite3.Error) as error:
             if data.get("type") in ("helmetBegin", "helmetChunk", "helmetOpen"):
                 self.cancel_upload()
-            self.post_message({"type": "error", "message": str(error)})
+            self.post_message({"type": "error", "message": str(error), "id": data.get("id")})
 
 
 @orca.plugin

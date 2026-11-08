@@ -12,17 +12,16 @@ function createHelmetFitting(geometry) {
   function start(head, bytes) {
     const shell = geometry.inspectSTL(bytes), headBounds = bounds(head);
     return {shell, bytes, headBounds, center: midpoint(headBounds), origin: midpoint(bounds(shell)),
-      axes: [1, 2, 3], offset: [0, 0, 0], scale: [1, 1, 1]};
+      positions: geometry.surface(bytes), rotation: [1,0,0, 0,1,0, 0,0,1], offset: [0, 0, 0], scale: [1, 1, 1]};
   }
   function turn(fit, axis) {
     const a = (axis + 1) % 3, b = (axis + 2) % 3;
-    [fit.axes[a], fit.axes[b]] = [-fit.axes[b], fit.axes[a]];
+    const r=fit.rotation.slice();
+    for(let j=0;j<3;j++){fit.rotation[a*3+j]=-r[b*3+j];fit.rotation[b*3+j]=r[a*3+j];}
   }
   function local(p, fit) {
-    return fit.axes.map(axis => {
-      const i = Math.abs(axis) - 1;
-      return Math.sign(axis) * (p[i] - fit.origin[i]);
-    });
+    const x=p[0]-fit.origin[0],y=p[1]-fit.origin[1],z=p[2]-fit.origin[2],r=fit.rotation;
+    return [r[0]*x+r[1]*y+r[2]*z,r[3]*x+r[4]*y+r[5]*z,r[6]*x+r[7]*y+r[8]*z];
   }
   function place(p, fit) {
     return local(p, fit).map((v, i) => v * fit.scale[i] + fit.center[i] + fit.offset[i]);
@@ -43,7 +42,7 @@ function createHelmetFitting(geometry) {
   function estimate(fit, padding, uniform) {
     if (!Number.isFinite(padding) || padding < 0) throw Error('Enter a padding thickness of zero or more.');
     const hits = [[], [], []];
-    geometry.readSTL(fit.bytes, tri => {
+    geometry.visitSurface(fit.positions, tri => {
       const points = tri.map(p => local(p, fit));
       hits.forEach((values, axis) => {
         const x = crossing(points, axis);
@@ -70,7 +69,7 @@ function createHelmetFitting(geometry) {
   function fittedSTL(fit) {
     const bytes = new ArrayBuffer(84+50*fit.shell.count), out = new DataView(bytes);
     out.setUint32(80,fit.shell.count,true);
-    geometry.readSTL(fit.bytes,(tri,index) => {
+    geometry.visitSurface(fit.positions,(tri,index) => {
       const [p,q,r] = tri.map(point => place(point,fit));
       const a = q.map((v,i)=>v-p[i]), b = r.map((v,i)=>v-p[i]);
       const n = [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
@@ -92,7 +91,7 @@ function createHelmetFitting(geometry) {
     const headLines=[], shellLines=[];
     if(headBytes) geometry.readSTL(headBytes,tri=>cut(tri,headLines));
     else for(const face of head.faces) cut(face.map(i=>head.vertices[i]),headLines);
-    geometry.readSTL(fit.bytes,tri=>cut(tri.map(p=>place(p,fit)),shellLines));
+    geometry.visitSurface(fit.positions,tri=>cut(tri.map(p=>place(p,fit)),shellLines));
     return {headLines,shellLines};
   }
   return {start, turn, preview, estimate, fittedSTL, bounds, crossSection};

@@ -28,10 +28,20 @@ for(const axis of [0,1]){
   assert(cut.headLines.length && cut.shellLines.length);
   for(const line of cut.shellLines)line.forEach(p=>close(p[axis],fit.center[axis]));
 }
+// Arbitrary handle angle, followed by independent width/height scale and a translation.
+const angle=.41, c=Math.cos(angle),s=Math.sin(angle),orig=JSON.stringify(head);
+fit.rotation=[c,-s,0,s,c,0,0,0,1];fit.offset=[9,-3,4];fit.scale=[.91,1.15,.84];
+const fullOutput=geometry.surface(fitting.fittedSTL(fit));
+for(let i=0;i<fit.positions.length;i+=3){
+  const [x,y,z]=fit.positions.slice(i,i+3);
+  const expected=[(c*x-s*y)*.91+9,(s*x+c*y)*1.15-3,z*.84+4];
+  expected.forEach((v,k)=>close(fullOutput[i+k],v));
+}
+assert.equal(JSON.stringify(head),orig);
 if(process.argv[2]){
   const bytes=require('node:fs').readFileSync(process.argv[2]);
   const full=fitting.start(geometry.generate(),bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));
-  assert(full.shell.count>full.shell.faces.length);
+  assert.equal(full.positions.length,full.shell.count*9);
   const copy=geometry.inspectSTL(fitting.fittedSTL(full));
   assert.equal(copy.count,full.shell.count);
   full.shell.mins.forEach((n,i)=>close(copy.maxs[i]-copy.mins[i],full.shell.maxs[i]-n));

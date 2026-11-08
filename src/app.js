@@ -26,36 +26,49 @@
   function field(tag,text){const el=document.createElement(tag);el.textContent=text;panel.append(el);return el;}
   function base64(buffer){const a=new Uint8Array(buffer);let s='';for(let i=0;i<a.length;i+=16384)s+=String.fromCharCode(...a.subarray(i,i+16384));return btoa(s);}
   function from64(s){return Uint8Array.from(atob(s),c=>c.charCodeAt(0)).buffer;}
-  function selectHead(id){
-    selectedId=id;saved=null;note();
-    $('useHead').disabled=true;view.show(G.generate(),null,true);
-    if(native)window.orca.postMessage({type:'getHead',id});
-    else browserRead('profiles',store=>store.get(id)).then(p=>headLoaded(id,p)).catch(failed);
+  let studio=null,studioOK=true,toolMode='orbit',opacity=.5,surfaceFit=null;
+  const thumbs=new Map(),looks=new Map();
+  const library=()=>$('head-room').classList.contains('library-mode');
+  function layout(mode){
+    $('head-room').classList.toggle('library-mode',mode==='library');
+    $('head-room').classList.toggle('fit-mode',mode==='fit');
+    if(mode!=='fit'){studio?.stop();surfaceFit=null;$('surface').hidden=true;$('view').hidden=false;$('fitTools').hidden=true;}
   }
-  function headLoaded(id,p){
-    if(id!==selectedId||!$('useHead'))return;
-    try{
-      const preview=p.kind==='stl'?G.inspectSTL(from64(p.data)):G.generate(p.values);
-      view.show(preview,null,true);saved=p;$('useHead').disabled=false;
-    }catch(err){note('Could not open this saved head. '+err.message);}
+  function fetchHead(id){
+    if(!native)return browserRead('profiles',s=>s.get(id));
+    if(!looks.has(id)){let resolve,reject;const p=new Promise((a,b)=>{resolve=a;reject=b;});
+      looks.set(id,{p,resolve,reject});window.orca.postMessage({type:'getHead',id});}
+    return looks.get(id).p;
   }
+  let libraryGeneration=0;
   function home(){
-    panel.replaceChildren();tools.hidden=false;fit=null;note();
-    field('h2',heads.length?'Your saved heads':'Choose a head');
-    if(heads.length){
-      const label=field('label','Saved head'), picker=document.createElement('select');label.htmlFor=picker.id='headPicker';
-      const counts=new Map(), labels=new Map();
-      for(const h of [...heads].reverse()){
-        const n=(counts.get(h.name)||0)+1;counts.set(h.name,n);
-        labels.set(h.id,n===1?h.name:h.name+' ('+n+')');
-      }
-      for(const h of heads)picker.add(new Option(labels.get(h.id),h.id));
-      picker.value=heads.some(h=>h.id===selectedId)?selectedId:heads[0].id;
-      panel.append(picker);const use=button('Use saved head',()=>openProfile(saved),true);use.id='useHead';buttons(use);
-      picker.onchange=()=>selectHead(picker.value);selectHead(picker.value);
-    }else view.show(G.generate(),null,true);
-    buttons(button('Make my head',()=>{draftId=null;profile={kind:'measured',name:'My head',values:{}};raw=null;step=0;wizard();},!heads.length),
-      button('Use my own STL',()=>$('file').click()));
+    const generation=++libraryGeneration;selectedId=null;
+    panel.replaceChildren();tools.hidden=false;fit=null;note();layout(heads.length?'library':'welcome');
+    field('h2',heads.length?'Your heads':'Choose a head');
+    if(heads.length)field('p','Choose a head to try on a helmet.').className='library-intro';
+    const make=button('Make my head',()=>{draftId=null;profile={kind:'measured',name:'My head',values:{}};raw=null;step=0;wizard();},!heads.length);
+    const scan=button('Use my own STL',()=>$('file').click());buttons(make,scan);
+    if(!heads.length){view.show(G.generate(),null,true);return;}
+    const grid=document.createElement('div');grid.className='portraits';panel.append(grid);
+    const counts=new Map(),labels=new Map();
+    for(const h of [...heads].reverse()){const n=(counts.get(h.name)||0)+1;counts.set(h.name,n);labels.set(h.id,n===1?h.name:h.name+' ('+n+')');}
+    const queue=[];
+    for(const h of heads){
+      const tile=button('',async()=>{selectedId=h.id;try{const p=await fetchHead(h.id);
+        if(library()&&selectedId===h.id&&generation===libraryGeneration)openProfile(p);
+      }catch(err){note(err.message);}});
+      tile.className='head-tile';tile.setAttribute('aria-label','Try a helmet on '+labels.get(h.id));
+      const art=document.createElement('span'),img=document.createElement('img'),name=document.createElement('strong'),arrow=document.createElement('span');
+      art.className='portrait-art';img.alt='';name.textContent=labels.get(h.id);arrow.className='tile-arrow';arrow.textContent='↗';arrow.setAttribute('aria-hidden','true');
+      art.append(img);tile.append(art,name,arrow);grid.append(tile);
+      if(thumbs.has(h.id))img.src=thumbs.get(h.id);else queue.push([h.id,img]);
+    }
+    (async()=>{for(const [id,img] of queue){if(!img.isConnected||!library())break;
+      try{const p=await fetchHead(id);if(!img.isConnected)break;
+        const url=headPortrait(p,G,from64);thumbs.set(id,url);img.src=url;
+      }catch{img.alt='Preview unavailable';}
+      await new Promise(r=>setTimeout(r,0));
+    }})();
   }
   function openProfile(p){
     try{
@@ -70,7 +83,7 @@
     return Number(match[1].replace(',','.'))*unitSize[(match[2]==='"'?'in':match[2]?.toLowerCase())||unit];
   }
   function wizard(){
-    tools.hidden=true;
+    layout('editor');tools.hidden=true;
     const [key,title,instruction]=steps[step];panel.replaceChildren();note();
     const progress=field('p','Measurement '+(step+1)+' of 4');progress.className='step';
     field('h2',title);field('p',instruction);
@@ -154,7 +167,7 @@
   function failed(e){pending=false;transfer=null;if($('save')||fit)panel.querySelectorAll('input,select,button').forEach(el=>el.disabled=false);note(String(e.message||e));}
   function structuredCopy(p){return {...p,...(p.values?{values:{...p.values}}:{})};}
   function review(isSaved){
-    tools.hidden=true;panel.replaceChildren();note();view.show(mesh,null,true);field('h2',isSaved?profile.name:'Review your head');
+    layout('editor');tools.hidden=true;panel.replaceChildren();note();view.show(mesh,null,true);field('h2',isSaved?profile.name:'Review your head');
     if(profile.kind==='measured'){
       const list=document.createElement('dl');list.className='values';
       for(const [key,title] of steps){const d=document.createElement('div'),t=document.createElement('dt'),v=document.createElement('dd');
@@ -164,6 +177,7 @@
         field('p','You entered '+Number(profile.values.circumference.toFixed(1))+' mm around the brow. This head shape reaches '+mesh.actual.circumference.toFixed(1)+' mm at the entered width and length.').className='hint';
     }else{const size=mesh.maxs.map((v,i)=>(v-mesh.mins[i]).toFixed(1));field('p','STL dimensions (X × Y × Z) '+size.join(' × ')+' mm. Coordinates are interpreted in millimetres.');}
     if(isSaved){
+      if(profile.kind==='measured')buttons(button('Edit measurements as new head',()=>{profile=structuredCopy(profile);draftId=null;step=0;wizard();}));
       buttons(button('Try on a helmet',tryOn,true),button('Export head STL',exportMesh),button('Back to heads',home));return;
     }
     const l=field('label','Head name');l.htmlFor='headName';const name=document.createElement('input');name.id='headName';name.maxLength=80;name.value=profile.name;panel.append(name);
@@ -179,7 +193,7 @@
     }catch(err){note(err.message);}
   };
   function tryOn(){
-    tools.hidden=true;fit=null;sectionMode='3D';uniform=true;padding=0;
+    layout('editor');tools.hidden=true;fit=null;sectionMode='3D';uniform=true;padding=0;
     panel.replaceChildren();note();view.show(mesh,null,true);
     field('p',profile.name).className='step';field('h2','Try on a helmet');
     field('p','Choose a helmet STL in millimetres to see it around your saved head.');
@@ -192,54 +206,60 @@
       if(f.size>96*1024*1024)throw Error('Choose a helmet STL under 96 MiB.');
       note('Reading helmet…');
       const next=fitter.start(mesh,await f.arrayBuffer());
-      fit=next;helmetName=f.name;sectionMode='3D';uniform=true;padding=0;fitPanel();
+      fit=next;helmetName=f.name;toolMode='orbit';opacity=.5;
+      try{studio??=createFitStudio($('surface'),syncOffsets);studio.start(fit,mesh,raw);studio.opacity(opacity);surfaceFit=fit;studioOK=true;}
+      catch(error){console.warn('3D view unavailable',error);studio?.stop();surfaceFit=null;studioOK=false;}sectionMode='3D';uniform=true;padding=0;if(!studioOK)sectionMode='Front section';fitPanel();
     }catch(err){note(err.message);}
   };
+  function syncOffsets(){panel.querySelectorAll('[data-offset]').forEach((el,i)=>el.value=Number(fit.offset[i].toFixed(2)));}
   function redrawFit(){
-    const axis=sectionMode==='Side section'?0:1;
-    const cut=sectionMode==='3D'?null:{axis,...fitter.crossSection(fit,mesh,raw,axis)};
-    view.fit(cut?null:fitter.preview(fit),cut);
-    document.querySelector('.hud span').textContent=cut?'Mint: head · Gold: helmet':'Drag to rotate';
+    const is3D=sectionMode==='3D'&&surfaceFit===fit;
+    $('view').hidden=is3D;$('surface').hidden=!is3D;$('fitTools').hidden=!is3D;
+    if(is3D){for(const b of $('fitTools').querySelectorAll('button'))b.setAttribute('aria-pressed',toolMode===b.dataset.tool);studio.apply();studio.tool(toolMode);studio.draw();}
+    else{const axis=sectionMode==='Side section'?0:1;view.fit(null,{axis,...fitter.crossSection(fit,mesh,raw,axis)});}
+    document.querySelector('.hud span').textContent=is3D?'Scroll to zoom · Shift-drag or middle-drag to pan':'Mint: head · Gold: helmet';
   }
   function fitPanel(){
-    panel.replaceChildren();note();field('p',profile.name+' · '+helmetName).className='step';
-    field('h2','Helmet fit');
-    function select(text,options,value,onChange){
-      const label=field('label',text), el=document.createElement('select');label.htmlFor=el.id='fit-'+text.replaceAll(' ','-');
-      for(const option of options)el.add(new Option(option,option));el.value=value;el.onchange=()=>onChange(el.value);panel.append(el);
+    layout('fit');panel.replaceChildren();note();
+    field('p',profile.name+'  /  '+helmetName.replace(/\.stl$/i,'')).className='step';
+    field('h2','Fit helmet');
+    function group(parent,labels,current,change){
+      const wrap=document.createElement('div');wrap.className='segmented';
+      for(const [label,value] of labels){const b=button(label,()=>change(value));b.setAttribute('aria-pressed',value===current);wrap.append(b);}
+      parent.append(wrap);return wrap;
     }
-    function numbers(parent,labels,values,low,high,apply){
+    function numbers(parent,labels,values,low,high,apply,offset=false){
       const row=document.createElement('div');row.className='fit-fields';
-      labels.forEach((name,i)=>{
-        const label=document.createElement('label'), el=document.createElement('input');
-        label.textContent=name;el.type='number';el.step='any';el.min=low;el.max=high;el.value=Number(values[i].toFixed(2));el.required=true;
-        el.onchange=()=>{if(el.reportValidity()){apply(i,el.valueAsNumber);note();redrawFit();}};
-        label.append(el);row.append(label);
-      });parent.append(row);
+      labels.forEach((name,i)=>{const label=document.createElement('label'),el=document.createElement('input');label.textContent=name;
+        el.type='number';el.step='any';el.min=low;el.max=high;el.value=Number(values[i].toFixed(2));el.required=true;if(offset)el.dataset.offset=i;
+        el.oninput=()=>{if(el.value!==''&&el.validity.valid){apply(i,el.valueAsNumber);note();redrawFit();}};
+        label.append(el);row.append(label);});parent.append(row);
     }
-    select('View',['3D','Side section','Front section'],sectionMode,v=>{sectionMode=v;redrawFit();});
-    const alignment=document.createElement('details'), title=document.createElement('summary');title.textContent='Align helmet';alignment.append(title);
-    const rot=document.createElement('div');rot.className='actions';
-    ['Pitch','Roll','Turn'].forEach((name,i)=>rot.append(button(name+' 90°',()=>{fitter.turn(fit,i);note();redrawFit();})));
-    alignment.append(rot);numbers(alignment,['Right (mm)','Back (mm)','Up (mm)'],fit.offset,-1000,1000,(i,x)=>fit.offset[i]=x);panel.append(alignment);
-    select('Scale',['Uniform','Per axis'],uniform?'Uniform':'Per axis',v=>{
-      uniform=v==='Uniform';if(uniform)fit.scale.fill(Math.max(...fit.scale));fitPanel();
-    });
-    numbers(panel,uniform?['Scale (%)']:['Width (%)','Depth (%)','Height (%)'],fit.scale.map(x=>100*x),5,1000,(i,x)=>{
-      if(uniform)fit.scale.fill(x/100);else fit.scale[i]=x/100;
-    });
-    const l=field('label','Padding per side (mm)'), pad=document.createElement('input');
-    l.htmlFor=pad.id='padding';pad.type='number';pad.min=0;pad.max=100;pad.step='any';pad.value=padding;panel.append(pad);
-    buttons(button('Estimate scale',()=>{
+    const modes=studioOK?[['3D','3D']]:[];modes.push(['Front cut','Front section'],['Side cut','Side section']);
+    group(panel,modes,sectionMode,v=>{sectionMode=v;fitPanel();});
+    if(!studioOK)field('p','3D graphics are unavailable here. The cuts show the full shell; use the alignment fields below.').className='hint';
+    if(studioOK&&sectionMode==='3D'){
+      const l=field('label','Helmet opacity'),out=document.createElement('output'),el=document.createElement('input');
+      l.htmlFor=el.id='opacity';l.className='range-label';out.textContent=Math.round(opacity*100)+'%';l.append(out);
+      el.type='range';el.min=0;el.max=100;el.value=Math.round(opacity*100);el.oninput=()=>{opacity=Number(el.value)/100;out.textContent=el.value+'%';studio.opacity(opacity);};panel.append(el);
+    }
+    field('h3','Helmet scale');
+    group(panel,[['Uniform',true],['Per axis',false]],uniform,v=>{uniform=v;if(v)fit.scale.fill(Math.max(...fit.scale));fitPanel();});
+    numbers(panel,uniform?['Size (%)']:['Width (%)','Depth (%)','Height (%)'],fit.scale.map(x=>100*x),5,1000,(i,x)=>{if(uniform)fit.scale.fill(x/100);else fit.scale[i]=x/100;});
+    const l=field('label','Padding per side (mm)'),pad=document.createElement('input');l.htmlFor=pad.id='padding';
+    pad.type='number';pad.min=0;pad.max=100;pad.step='any';pad.value=padding;pad.oninput=()=>{if(pad.value!==''&&pad.validity.valid)padding=pad.valueAsNumber;};
+    const line=document.createElement('div');line.className='row pad';line.append(pad,button('Estimate helmet scale',()=>{
       if(!pad.reportValidity()||!Number.isFinite(pad.valueAsNumber)){note('Enter a padding thickness in millimetres.');return;}
-      padding=pad.valueAsNumber;
-      try{fit.scale=fitter.estimate(fit,padding,uniform);fitPanel();note('Estimated using the inner walls at the helmet center and crown. Check the visor, jaw and neck opening in the sections.');}
-      catch(err){note(err.message);}
-    }));
-    field('p','Estimate uses the padding above. Inspect the fit before accepting the scale.').className='hint';
-    buttons(button(native?'Open fitted helmet in OrcaSlicer':'Download fitted helmet STL',acceptHelmet,true),button('Change helmet',()=>$('helmetFile').click()));
-    buttons(button('Back to head',tryOn));redrawFit();
+      try{fit.scale=fitter.estimate(fit,padding,uniform);fitPanel();note('Estimated from the inner walls and crown. Check the visor, jaw and entry opening.');}catch(err){note(err.message);}
+    }));panel.append(line);
+    const alignment=document.createElement('details'),title=document.createElement('summary');title.textContent='Precise alignment';alignment.append(title);
+    const rot=document.createElement('div');rot.className='actions';
+    ['Pitch','Roll','Turn'].forEach((name,i)=>rot.append(button(name+' 90°',()=>{fitter.turn(fit,i);redrawFit();})));
+    alignment.append(rot);numbers(alignment,['Right (mm)','Back (mm)','Up (mm)'],fit.offset,-1000,1000,(i,x)=>fit.offset[i]=x,true);panel.append(alignment);
+    buttons(button(native?'Open fitted helmet in OrcaSlicer':'Download fitted helmet STL',acceptHelmet,true));
+    buttons(button('Change helmet',()=>$('helmetFile').click()),button('Back to head',tryOn));redrawFit();
   }
+  for(const b of $('fitTools').querySelectorAll('button'))b.onclick=()=>{toolMode=b.dataset.tool;studio.tool(toolMode);for(const other of $('fitTools').querySelectorAll('button'))other.setAttribute('aria-pressed',other===b);};
   function acceptHelmet(){
     if(transfer||!Array.from(panel.querySelectorAll('input')).every(el=>el.reportValidity()))return;
     try{
@@ -261,16 +281,16 @@
     const chunk=transfer.bytes.slice(offset,offset+384*1024);transfer.offset+=chunk.byteLength;
     window.orca.postMessage({type:'helmetChunk',offset,data:base64(chunk)});
   }
-  $('resetView').onclick=()=>view.reset();
+  $('resetView').onclick=()=>fit&&sectionMode==='3D'&&studioOK?studio.reset():view.reset();
   if(native){
     window.orca.onMessage(msg=>{
       if(msg.type==='loaded'){heads=msg.heads;home();}
-      if(msg.type==='head')headLoaded(msg.id,msg.profile);
+      if(msg.type==='head'){looks.get(msg.id)?.resolve(msg.profile);looks.delete(msg.id);}
       if(msg.type==='saved')savedOK(msg.id);
       if(msg.type==='exported')note('STL saved to '+msg.path);
       if(msg.type==='helmetReady')nextChunk(msg.offset);
       if(msg.type==='helmetResult'){transfer=null;fitPanel();note(msg.message);}
-      if(msg.type==='error')failed(Error(msg.message));
+      if(msg.type==='error'){if(msg.id&&looks.has(msg.id)){looks.get(msg.id).reject(Error(msg.message));looks.delete(msg.id);}else failed(Error(msg.message));}
     });
     window.orca.postMessage({type:'load'});
   }else browserRead('headNames',s=>s.getAll()).then(items=>{heads=items.sort((a,b)=>b.created-a.created);home();}).catch(failed);

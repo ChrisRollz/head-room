@@ -110,6 +110,20 @@ const HeadRoomGeometry = (() => {
     if(!count||maxs.some((v,i)=>v<=mins[i]))throw Error('This STL has no three-dimensional surface.');
     return {vertices,faces,mins,maxs,count,guides:{}};
   }
-  return {defaults,generate,binarySTL,inspectSTL,readSTL};
+  // Contiguous, full-resolution triangles: one allocation, no decimation or STL normals required.
+  function surface(buffer){
+    let positions;
+    const count=readSTL(buffer,(tri,index,n)=>{
+      if(!positions)positions=new Float32Array(n*9);
+      for(let j=0;j<3;j++)positions.set(tri[j],index*9+j*3);
+    });
+    if(!count)throw Error('This STL has no triangles.');
+    return positions;
+  }
+  function visitSurface(positions,fn){
+    for(let i=0;i<positions.length;i+=9)
+      fn([[positions[i],positions[i+1],positions[i+2]],[positions[i+3],positions[i+4],positions[i+5]],[positions[i+6],positions[i+7],positions[i+8]]],i/9);
+  }
+  return {defaults,generate,binarySTL,inspectSTL,readSTL,surface,visitSurface};
 })();
 if(typeof module!=='undefined'&&module.exports)module.exports=HeadRoomGeometry;

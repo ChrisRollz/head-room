@@ -6,8 +6,11 @@ source = root / "src"
 dist = root / "dist"
 dist.mkdir(exist_ok=True)
 page = (source / "page.html").read_text()
-for key, file in [("GEOMETRY", "geometry.js"), ("FIT", "fit.js"), ("VIEW", "view.js"), ("APP", "app.js")]:
+for key, file in [("GEOMETRY", "geometry.js"), ("FIT", "fit.js"), ("VIEW", "view.js"), ("STUDIO", "studio.js"), ("APP", "app.js")]:
     page = page.replace(f"/*{key}*/", (source / file).read_text())
+vendor = source / "vendor"
+third_party = (vendor / "LICENSE").read_text()
+page = page.replace("/*THREE*/", "\n".join((vendor / f).read_text() for f in ["three.min.js", "OrbitControls.js", "TransformControls.js"]) + "\n/*\n" + third_party + "*/")
 license_text = (root / "LICENSE").read_text()
 page += "\n<!--\n" + license_text + "-->\n"
 host = (source / "host.py").read_text().replace('"__HEAD_ROOM_PAGE__"', repr(page))

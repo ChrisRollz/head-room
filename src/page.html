@@ -39,11 +39,41 @@ html:root body{margin:0;padding:0;background:#151b1f}
   #head-room .panel::before,#head-room .panel::after{content:"";margin-block:auto}
 }
 @media(max-width:720px){#head-room section{grid-template-rows:minmax(240px,38vh) auto}#head-room .scene{height:auto;min-height:0}.tools dl{grid-template-columns:1fr;gap:10px}}
+
+#head-room .library-intro{margin:0;color:#afc2bf}
+#head-room.library-mode section{display:block;overflow:auto;background:#1c262a}
+#head-room.library-mode .scene{display:none}
+#head-room.library-mode .panel{border:0;padding:clamp(22px,4vw,60px);display:block;overflow:visible}
+.library-mode #content{max-width:1150px;margin:auto;display:grid;grid-template-columns:1fr auto;align-items:end;column-gap:16px}
+.library-mode #content h2{margin:0 0 4px;letter-spacing:-1.6px;font-size:clamp(30px,4vw,48px)}
+.library-intro{grid-column:1}.library-mode #content>.actions{grid-column:2;grid-row:1 / span 2;align-self:center;margin:0}
+.portraits{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,205px),1fr));gap:16px;margin:28px 0 10px}
+#head-room .head-tile{max-width:325px;min-width:0;text-align:left;padding:0;display:grid;grid-template-columns:1fr auto;align-items:center;gap:0;overflow:hidden;border-radius:15px;background:#223034;border:1px solid #415651;color:#f0f7f4}
+.portrait-art{grid-column:1/-1;display:grid;place-items:center;width:100%;height:clamp(140px,18vw,205px);background:radial-gradient(ellipse at 42% 40%,#49615a,#263936 73%);border-bottom:1px solid #415651}
+.portrait-art img{width:100%;height:100%;object-fit:contain;min-height:0}
+.head-tile strong{padding:13px 0 13px 16px;overflow-wrap:anywhere}.tile-arrow{color:#9fe2c8;padding:0 15px;font-size:20px}
+#head-room .head-tile:hover{border-color:#8edcc5;filter:brightness(1.05)}
+#head-room.fit-mode section{grid-template-columns:minmax(0,1fr) clamp(270px,29vw,375px)}
+#head-room.fit-mode .panel{padding:clamp(14px,2.4vw,28px);justify-content:flex-start}
+#head-room.fit-mode .panel::before,#head-room.fit-mode .panel::after{display:none}
+#head-room.fit-mode h2{margin:0 0 18px}#head-room.fit-mode h3{margin:22px 0 8px;font-size:17px}
+#head-room.fit-mode .step{overflow-wrap:anywhere;margin:0 0 5px;color:#9fbab3}
+.segmented,.view-tools{display:flex;gap:2px;padding:3px;border:1px solid #415252;border-radius:10px;background:#162023}
+#head-room .segmented button,#head-room .view-tools button{border:0;background:transparent;color:#bfceca;font-size:14px;font-weight:550;padding:6px 10px;border-radius:6px}
+#head-room .segmented button{flex:1}#head-room button[aria-pressed=true]{background:#354a48;color:#d7fff0}
+.view-tools{position:absolute;top:14px;left:14px;background:#182326ee}
+#head-room .range-label{display:flex;justify-content:space-between;font-size:14px}#head-room output{color:#a8c6be;font-variant-numeric:tabular-nums}
+#head-room input[type=range]{height:20px;accent-color:#8edcc5;padding:0}
+.fit-fields:has(> :only-child){grid-template-columns:1fr}#head-room.fit-mode input[type=number]{padding:6px 9px}
+#head-room.fit-mode .pad input{width:68px;flex:0 1 68px}.pad button{font-size:14px}
+#head-room.fit-mode .hud{border-radius:8px;background:#162023e8;padding:4px 8px 4px 4px;max-width:calc(100% - 24px);pointer-events:none}
+#head-room .hud button{pointer-events:auto}.hud span{line-height:1.25}
+@media(max-width:720px){#head-room.fit-mode section{grid-template-columns:1fr;grid-template-rows:minmax(265px,46vh) auto}.library-mode #content{display:block}.library-mode #content>.actions{margin-top:16px}.portraits{grid-template-columns:repeat(auto-fit,minmax(min(100%,142px),1fr));gap:10px;margin-top:18px}.portrait-art{height:138px}}
 </style></head><body><main id="head-room"><header><span class="mark" aria-hidden="true"></span><h1>Head Room</h1></header>
-<section><div class="scene"><canvas id="view" aria-label="Head preview with measurement guides"></canvas><div class="hud"><button type="button" id="resetView">Reset view</button><span>Drag to rotate</span></div></div>
+<section><div class="scene"><canvas id="view" aria-label="Head preview with measurement guides"></canvas><canvas id="surface" hidden aria-label="Helmet fitting viewport"></canvas><div id="fitTools" class="view-tools" role="group" aria-label="Helmet positioning" hidden><button type="button" data-tool="orbit" aria-pressed="true">Orbit</button><button type="button" data-tool="translate">Move</button><button type="button" data-tool="rotate">Rotate</button></div><div class="hud"><button type="button" id="resetView">Reset view</button><span>Drag to rotate</span></div></div>
 <div class="panel"><div id="content"></div><p id="status" class="status" role="status"></p></div></section>
 <aside class="tools" id="tools" aria-labelledby="toolsTitle"><h3 id="toolsTitle">Suggested tools</h3><dl>
 <div><dt>Flexible measuring tape</dt><dd>Wrap it around your brow. A strip of paper or non-stretch string marked and measured flat works too.</dd></div>
 <div><dt>Rigid tape or ruler</dt><dd>Measure straight distances between two parallel books, or read the gap between caliper tips.</dd></div>
 <div><dt>Cosplay calipers <small>(optional)</small></dt><dd>Lightly touch the two landmarks and lift the calipers away. <a id="caliperLink" href="https://www.printables.com/model/14099-cosplay-calipers/files" target="_blank" rel="noopener noreferrer">Uncle Jessy’s files on Printables</a></dd></div>
-</dl></aside><input type="file" id="file" accept=".stl" hidden><input type="file" id="helmetFile" accept=".stl" hidden></main><script>/*GEOMETRY*/</script><script>/*FIT*/</script><script>/*VIEW*/</script><script>/*APP*/</script></body></html>
+</dl></aside><input type="file" id="file" accept=".stl" hidden><input type="file" id="helmetFile" accept=".stl" hidden></main><script>/*GEOMETRY*/</script><script>/*FIT*/</script><script>/*THREE*/</script><script>/*STUDIO*/</script><script>/*VIEW*/</script><script>/*APP*/</script></body></html>
