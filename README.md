@@ -1,4 +1,4 @@
-<img src="dist/cloud/head-room-icon.png" width="80" height="80" alt="Head Room mannequin with a measuring tape around its brow">
+<img src="dist/cloud/head-room-icon.png" width="80" height="80" alt="A silver helmet outline over a mint mannequin wearing a gold measuring tape">
 
 # Head Room for OrcaSlicer
 
