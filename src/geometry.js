@@ -39,20 +39,29 @@ const HeadRoomGeometry = (() => {
       if(perimeter(w,l,mid)<c) low=mid; else high=mid;
     }
     const e=(low+high)/2, vertices=[], faces=[];
+    const eyeZ=measured.eyeDrop==null?.514:1-measured.eyeDrop/h;
+    const eyeX=measured.pupilGap==null?.41:measured.pupilGap/w;
     function bump(x,t,cx,ct,wx,wt) {return Math.exp(-(((x-cx)/wx)**2+((t-ct)/wt)**2));}
-    const levels=[...new Set([...Array.from({length:50},(_,i)=>i/50),.64])].sort((a,b)=>a-b);
+    const levels=[...new Set([...(Object.keys(measured).some(k=>!(k in defaults))?[.44,.38,Math.max(.02,Math.min(.98,eyeZ))]:[]),...Array.from({length:50},(_,i)=>i/50),.64])].sort((a,b)=>a-b);
+    function faceY(xn,t) {
+      return .095*bump(xn,t,0,.385,.21,.069)+.043*bump(xn,t,0,.465,.17,.12)
+         -.048*bump(Math.abs(xn),t,eyeX,eyeZ,.22,.057)+.019*bump(Math.abs(xn),t,.47,.425,.25,.075)
+         +.022*bump(xn,t,0,.227,.36,.036);
+    }
+    const noseBase=section(.38);
+    const naturalTip=l*(noseBase[2]-noseBase[1]/2-faceY(0,.38));
+    const noseShift=measured.noseDepth==null?0:l/2-measured.noseDepth-naturalTip;
     for(const t of levels) {
       const [sw,sl,shift]=section(t);
       for(let j=0;j<slices;j++){
         const a=j*2*Math.PI/slices, [x,y]=oval(a,w*sw,l*sl,e);
         const xn=x/(w/2), front=Math.max(0,-Math.sin(a))**5;
         const browFade=Math.max(0,Math.min(1,(.64-t)/.05));
-        const relief= .095*bump(xn,t,0,.385,.21,.069) + .043*bump(xn,t,0,.465,.17,.12)
-          - .048*bump(Math.abs(xn),t,.41,.514,.22,.057)
-          + .019*bump(Math.abs(xn),t,.47,.425,.25,.075)
-          + .022*bump(xn,t,0,.227,.36,.036);
-        const ear=browFade*.034*bump(Math.abs(Math.sin(a)),t,.12,.44,.13,.095);
-        vertices.push([x+Math.sign(x)*w*ear,y+l*(shift-front*browFade*relief),h*t]);
+        const relief=faceY(xn,t);
+        const protrusion=x>0?measured.earLeft:measured.earRight;
+        const ear=protrusion==null?w*browFade*.034*bump(Math.abs(Math.sin(a)),t,.12,.44,.13,.095):
+          protrusion*bump(Math.sin(a),t,0,.44,.18,.078);
+        vertices.push([x+Math.sign(x)*ear,y+l*(shift-front*browFade*relief)+front*noseShift*bump(xn,t,0,.38,.22,.08),h*t]);
       }
     }
     for(let row=0;row<levels.length-1;row++) for(let j=0;j<slices;j++){
@@ -66,7 +75,16 @@ const HeadRoomGeometry = (() => {
     const loop=vertices.slice(levels.indexOf(.64)*slices,(levels.indexOf(.64)+1)*slices);
     const guides={circumference:[...loop,loop[0]],width:[[-w/2,0,z],[w/2,0,z]],
       length:[[0,-l/2,z],[0,l/2,z]],height:[[0,-.28*l,0],[0,.034*l,h]]};
-    return {vertices,faces,guides,actual:{circumference:perimeter(w,l,e),width:w,length:l,height:h}};
+    const ez=eyeZ*h, gap=(measured.pupilGap??w*.41),sec=section(eyeZ);
+    const eyeY=l*(sec[2]-.5*sec[1]*Math.pow(Math.max(0,1-Math.pow(gap/(w*sec[0]),e)),1/e))-2;
+    const eyes=[[-gap/2,eyeY,ez],[gap/2,eyeY,ez]];
+    guides.eyeDrop=[[0,eyeY,h],[0,eyeY,ez]];guides.pupilGap=eyes;
+    guides.noseDepth=[[0,l/2,h*.38],[0,naturalTip+noseShift,h*.38]];
+    for(const [key,sign] of [['earLeft',1],['earRight',-1]]){
+      const x=w*.5*section(.44)[0],y=l*section(.44)[2];
+      guides[key]=[[sign*x,y,h*.44],[sign*(x+(measured[key]??w*.034)),y,h*.44]];
+    }
+    return {vertices,faces,guides,eyes:measured.eyeDrop!=null||measured.pupilGap!=null?eyes:null,actual:{circumference:perimeter(w,l,e),width:w,length:l,height:h}};
   }
   function binarySTL(mesh) {
     const data=new ArrayBuffer(84+50*mesh.faces.length), v=new DataView(data);

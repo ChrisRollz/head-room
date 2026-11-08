@@ -67,6 +67,29 @@ class HeadLibraryTest(unittest.TestCase):
             self.assertEqual(first["pose"],expected)
             self.assertEqual(base64.b64decode(first["data"])+base64.b64decode(call("Read",offset=chunk,head=head)["data"]),source)
 
+    def test_named_revisions_and_backup_keep_existing_records(self):
+        self.send('save',id='a'*32,profile=self.measured)
+        revised=dict(self.measured,values=dict(self.measured['values'],eyeDrop=95,earLeft=0,earRight=10))
+        self.assertEqual(self.send('save',id='b'*32,profile=revised)['type'],'saved')
+        self.assertEqual(self.send('getHead',id='a'*32)['profile'],self.measured)
+        self.assertEqual(self.send('shelfImportHead',id='a'*32,profile=revised).get('error'),'That head ID already belongs to another profile.')
+        raw=b'example';key=hashlib.sha256(raw).hexdigest()
+        self.send('shelfBegin',id=key,size=len(raw))
+        self.send('shelfChunk',id=key,offset=0,data=base64.b64encode(raw).decode())
+        pose=dict(rotation=[1,0,0,0,1,0,0,0,1],offset=[0,0,0],scale=[1]*3,uniform=True,padding=0)
+        def store(p,revision):
+            return self.send('shelfSave',id=key,name='shell.stl',thumb='data:image/png;base64,AA==',head='a'*32,pose=p,revision=revision)
+        self.assertNotIn('error',store(pose,None))
+        for i in [1,2]:
+            self.assertNotIn('error',store(dict(pose,padding=i),dict(uid=str(i)*32,name='Daily',version='v'+str(i))))
+        self.assertIn('error',store(pose,dict(uid='5'*32,name='Daily',version='v1')))
+        self.assertEqual([r['pose']['padding'] for r in self.send('shelfVersions')['items']],[2,1,0])
+        data=b'HEADRM01'+bytes(10)
+        self.send('shelfBackupBegin',size=len(data))
+        self.send('shelfBackupPart',offset=0,data=base64.b64encode(data).decode())
+        path=Path(self.send('shelfBackupEnd')['path'])
+        self.assertEqual(path.read_bytes(),data)
+
     def test_fitted_file_survives_interrupted_transfer_and_denied_launch(self):
         data = bytes(80) + struct.pack('<I', 1) + bytes(50)
         filename = 'Workshop-fitted.stl'
@@ -75,7 +98,8 @@ class HeadLibraryTest(unittest.TestCase):
         self.send('helmetBegin', name=filename, size=len(data))
         self.assertEqual(self.send('helmetChunk', offset=17, data='AAAA')['type'], 'error')
         self.assertEqual(output.read_bytes(), b'previous')
-        for denied in [True, False]:
+        for seq,denied in enumerate([True, False],2):
+            handoff=output.with_name(f'Workshop-fitted-{seq}.stl')
             self.assertEqual(self.send('helmetBegin', name=filename, size=len(data))['offset'], 0)
             for offset in [0, 80]:
                 part = data[offset:80] if offset == 0 else data[offset:]
@@ -83,11 +107,12 @@ class HeadLibraryTest(unittest.TestCase):
                 self.assertEqual(answer['offset'], offset + len(part))
             with patch.object(sys, 'platform', 'darwin'), patch('subprocess.run', side_effect=PermissionError if denied else None) as launch:
                 answer = self.send('helmetOpen')
-                launch.assert_called_once_with(['/usr/bin/open', '-b', 'com.orcaslicer.OrcaSlicer', str(output)], check=True, timeout=15)
+                launch.assert_called_once_with(['/usr/bin/open', '-b', 'com.orcaslicer.OrcaSlicer', str(handoff)], check=True, timeout=15)
             self.assertEqual(answer['type'], 'helmetResult')
-            self.assertEqual(answer.get('path'), str(output) if denied else None)
-            self.assertEqual(output.read_bytes(), data)
-        self.assertEqual(list(self.folder.iterdir()), [output])
+            self.assertEqual(answer.get('path'), str(handoff) if denied else None)
+            self.assertEqual(handoff.read_bytes(), data)
+            self.assertEqual(output.read_bytes(), b'previous')
+        self.assertEqual(len(list(self.folder.iterdir())),3)
 
 
 if __name__ == '__main__':

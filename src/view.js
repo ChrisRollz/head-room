@@ -8,7 +8,7 @@ function createHeadView(canvas, moveHelmet) {
     const {right,sign,up}=planes[section.axis],delta=[0,0,0];
     delta[right]=sign*dx;delta[up]=dy;moveHelmet(delta);
   }
-  const poses={circumference:[-.45,.32],width:[0,.02],length:[1.45,.10],height:[1.33,.04]};
+  const poses={circumference:[-.45,.32],width:[0,.02],length:[1.45,.10],height:[1.33,.04],eyeDrop:[.45,0],pupilGap:[0,0],noseDepth:[1.49,0],earLeft:[.62,.09],earRight:[-.62,.09]};
   function reset(){zoom=1;pan=[0,0];[yaw,pitch]=section ? [section.axis===0?Math.PI/2:0,0] : poses[guide]||[-.38,.12];draw();}
   function draw(){
     if(!mesh)return;
@@ -26,6 +26,19 @@ function createHeadView(canvas, moveHelmet) {
           ctx.lineTo(w/2+pan[0]+sign*(b[right]-center[right])*scale,h*.49+pan[1]-(b[up]-center[up])*scale);
         }
         ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
+      }
+      for(const i of new Set(section.foam?.map(f=>f.i))){
+        const segments=section.foam.filter(f=>f.i===i).map(f=>f.line);
+        outline(segments,section.short?.includes(i)?'#ff8ca6':'#c6abff');
+        if(section.short?.includes(i)){ctx.setLineDash([3,4]);outline(segments,'#3b232e');ctx.setLineDash([]);}
+      }
+      if(section.eyes){
+        const [a,b]=section.eyes;ctx.setLineDash([5,5]);
+        if(section.axis!==2){
+          const aa=a.slice(),bb=b.slice();aa[right]=center[right]-extent*.45;bb[right]=center[right]+extent*.45;
+          outline([[aa,bb]],'#54c9d7');
+        }else if(Math.abs(a[2]-section.plane)<3)outline([[a,b]],'#54c9d7');
+        ctx.setLineDash([]);
       }
       outline(section.headLines,'#9de6ce');outline(section.shellLines,'#ffd084');
       return;

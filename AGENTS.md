@@ -1,6 +1,6 @@
 # Release handoff
 
-CHANGELOG.md contains the exact text for the Orca Cloud Changelog field. For each release, prepend one plain-text paragraph. Start with the bare version, one space, then the user-visible changes on the same line. Put one blank line between versions and preserve the wording of earlier entries. Give the maintainer the full history, newest first, ready to paste.
+Keep the full history in CHANGELOG.md. For Orca Cloud, paste only the current release: one plain-text paragraph starting with the bare version and one space. Do not repeat earlier entries; the Hub already displays release history. Link the full local changelog separately.
 
 Include the version, minimum OrcaSlicer version, local upload and icon links, listing name, type, tags, GitHub commit, what was verified, and the next action for the public listing.
 

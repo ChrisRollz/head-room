@@ -12,8 +12,8 @@ function createHelmetLibrary(bridge, encode, decode){
   function receive(reply){const done=waiting.get(reply.requestId);waiting.delete(reply.requestId);done?.(reply);}
   async function db(){
     if(!dbPromise)dbPromise=new Promise((resolve,reject)=>{
-      const r=indexedDB.open('head-room-helmets',1);
-      r.onupgradeneeded=()=>{for(const key of ['files','names','fits'])r.result.createObjectStore(key);};
+      const r=indexedDB.open('head-room-helmets',2);
+      r.onupgradeneeded=()=>{for(const key of ['files','names','fits','versions'])if(!r.result.objectStoreNames.contains(key))r.result.createObjectStore(key);};
       r.onsuccess=()=>{r.result.onversionchange=()=>{r.result.close();dbPromise=null;};resolve(r.result);};
       r.onerror=()=>{dbPromise=null;reject(r.error);};
     });
@@ -25,7 +25,7 @@ function createHelmetLibrary(bridge, encode, decode){
       tx.oncomplete=()=>resolve(result?.());tx.onabort=()=>reject(tx.error||Error('Helmet storage is unavailable.'));
     });
   }
-  async function save({id,name,bytes,thumb,head,pose}){
+  async function save({id,name,bytes,thumb,head,pose,revision}){
     if(!id){
       const key=crypto.subtle?new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)):crypto.getRandomValues(new Uint8Array(16));
       id=Array.from(key,n=>n.toString(16).padStart(2,'0')).join('');
@@ -36,12 +36,15 @@ function createHelmetLibrary(bridge, encode, decode){
       if(!exists)for(let offset=0;offset<size;offset+=CHUNK){
         await request('shelfChunk',{id,offset,data:encode(bytes.slice(offset,offset+CHUNK))});
       }
-      await request('shelfSave',{...meta,head,pose});return id;
+      await request('shelfSave',{...meta,head,pose,revision});return id;
     }
-    await transaction(['files','names','fits'],'readwrite',s=>{
+    await transaction(['files','names','fits','versions'],'readwrite',s=>{
       const existing=s('names').getKey(id);existing.onsuccess=()=>{
         if(existing.result===undefined){s('files').add(bytes,id);s('names').add(meta,id);}
-        if(head&&pose)s('fits').put(pose,[id,head]);
+        if(head&&pose&&revision){
+          const stamp=[id,head,revision.name,revision.version];
+          s('versions').add({...revision,head,shell:id,pose},stamp);
+        }else if(head&&pose)s('fits').add(pose,[id,head]);
       };
     });return id;
   }
@@ -61,8 +64,15 @@ function createHelmetLibrary(bridge, encode, decode){
       }return {bytes:result.buffer,pose};
     }
     return transaction(['files','fits'],'readonly',s=>{
-      const data=s('files').get(id),fit=s('fits').get([id,head]);return ()=>({bytes:data.result,pose:fit.result});
+      const data=s('files').get(id),fit=s('fits').get([id,head||'']);return ()=>({bytes:data.result,pose:fit.result});
     });
   }
-  return {list,get,save,receive};
+  async function versions(){
+    if(bridge)return (await request('shelfVersions')).items;
+    return transaction(['fits','versions'],'readonly',s=>{
+      const v=s('versions').getAll(),keys=s('fits').getAllKeys(),p=s('fits').getAll();
+      return ()=>v.result.concat(keys.result.map(([shell,head],i)=>({uid:'old:'+shell+':'+head,shell,head,name:'Original fit',version:'v1',pose:p.result[i]})));
+    });
+  }
+  return {list,get,save,receive,request,versions};
 }

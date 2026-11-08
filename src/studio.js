@@ -1,6 +1,6 @@
 // The same r128 orbit and local-space transformation handles as the Berserk fitting viewer.
 // Render only on interaction. The proxy has the shell's pose; neither the head nor the camera is its child.
-function createFitStudio(canvas,onPose){
+function createFitStudio(canvas,onPose,onPad){
   const T=window.THREE, ren=new T.WebGLRenderer({canvas,alpha:true,antialias:true});
   ren.setPixelRatio(Math.min(devicePixelRatio||1,2));ren.outputEncoding=T.sRGBEncoding;
   const scene=new T.Scene(),cam=new T.OrthographicCamera(-1,1,1,-1,.1,50000);
@@ -18,6 +18,28 @@ function createFitStudio(canvas,onPose){
   // Nearest shell surface only, so 50% means one translucent layer even on a thick-walled STL.
   const depthMat=new T.MeshBasicMaterial({colorWrite:false,side:T.DoubleSide});
   let active=null,skull,shell,depthShell,span=300,raf=0;
+  const overlayGroup=new T.Group();scene.add(overlayGroup);
+  let drawnRows=null,drawnFocus=null,drawnEyes=null,press=null;
+  const foamMats=[0xac91ef,0xff89a2].map(color=>new T.MeshBasicMaterial({color,side:T.DoubleSide}));
+  const markerMat=new T.MeshBasicMaterial({color:0x36e0ee,depthTest:false});
+  const eyeLineMat=new T.LineBasicMaterial({color:0x36e0ee,depthTest:false});
+  function clearOverlays(){for(const child of [...overlayGroup.children]){overlayGroup.remove(child);child.geometry.dispose();}drawnRows=drawnEyes=null;}
+  function overlays(rows,focus,eyes){
+    if((rows===drawnRows||!rows.length&&!drawnRows?.length)&&focus===drawnFocus&&eyes===drawnEyes)return;
+    clearOverlays();drawnRows=rows;drawnFocus=focus;drawnEyes=eyes;
+    rows.forEach((r,i)=>{if(!r)return;
+      const obj=new T.Mesh(geometry(r.positions),foamMats[Number(r.short)]);obj.userData.pad=i;
+      obj.renderOrder=.2;overlayGroup.add(obj);
+    });
+    if(eyes){const line=new T.Line(new T.BufferGeometry().setFromPoints(eyes.map(v=>new T.Vector3(...v))),eyeLineMat);line.renderOrder=2;overlayGroup.add(line);
+      for(const p of eyes){const dot=new T.Mesh(new T.SphereGeometry(2,10,8),markerMat);dot.position.fromArray(p);dot.renderOrder=2;overlayGroup.add(dot);}}
+    draw();
+  }
+  canvas.addEventListener('pointerdown',e=>{press=e.button===0&&!e.shiftKey?[e.clientX,e.clientY]:null;});
+  canvas.addEventListener('pointerup',e=>{if(!press||Math.hypot(e.clientX-press[0],e.clientY-press[1])>4||gizmo.object)return;
+    const rect=canvas.getBoundingClientRect(),ray=new T.Raycaster();
+    ray.setFromCamera(new T.Vector2(2*(e.clientX-rect.left)/rect.width-1,1-2*(e.clientY-rect.top)/rect.height),cam);
+    const hit=ray.intersectObjects(overlayGroup.children.filter(o=>o.userData.pad!=null))[0];if(hit)onPad(hit.object.userData.pad);});
   let navPress=false;
   canvas.addEventListener('pointerdown',e=>{navPress=e.shiftKey||e.ctrlKey||e.metaKey||e.button!==0;},true);
   const begin=gizmo.pointerDown.bind(gizmo);gizmo.pointerDown=p=>{if(!navPress)begin(p);};
@@ -43,7 +65,7 @@ function createFitStudio(canvas,onPose){
     orbit.target.fromArray(c);cam.position.fromArray(c).add(V.set(.53,-1,.27).normalize().multiplyScalar(span*3));
     cam.zoom=1;cam.updateProjectionMatrix();orbit.update();draw();}
   function geometry(pos){const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(pos,3));g.computeVertexNormals();return g;}
-  function stop(){gizmo.detach();active=null;for(const m of [skull,shell])if(m){scene.remove(m);m.geometry.dispose();}
+  function stop(){clearOverlays();gizmo.detach();active=null;for(const m of [skull,shell])if(m){scene.remove(m);m.geometry.dispose();}
     if(depthShell)scene.remove(depthShell);skull=shell=depthShell=null;orbit.enabled=true;}
   function start(f,head,headBytes){stop();active=f;
     let geom;
@@ -58,7 +80,7 @@ function createFitStudio(canvas,onPose){
     span=2.23*Math.max(radius(geom.attributes.position.array,[0,0,0]),radius(skull.geometry.attributes.position.array,f.center));
     apply();reset();tool('orbit');}
   function opacity(v){if(depthShell)depthShell.visible=v>0&&v<1;shellMat.opacity=v;shellMat.transparent=v<1;shellMat.depthWrite=v>=1;shellMat.needsUpdate=true;draw();}
-  return {start,apply,tool,reset,stop,opacity,draw};
+  return {start,apply,tool,reset,stop,opacity,draw,overlays};
 }
 
 // Render each library portrait from the wearer's mesh, even when WebGL is unavailable.

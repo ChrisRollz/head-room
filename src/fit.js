@@ -138,6 +138,6 @@ function createHelmetFitting(geometry) {
     const level=row.reduce((n,v,i)=>n+v*fit.origin[i],0)+(plane-fit.center[axis]-fit.offset[axis])/fit.scale[axis];
     return {headLines:cut.lines,shellLines:sliceSurface(fit.positions,row,level,p=>place(p,fit))};
   }
-  return {start, turn, preview, estimate, fittedSTL, bounds, crossSection, sliceRange};
+  return {start, turn, preview, estimate, fittedSTL, bounds, crossSection, sliceRange, sliceSurface};
 }
 if(typeof module!=='undefined'&&module.exports)module.exports=createHelmetFitting;

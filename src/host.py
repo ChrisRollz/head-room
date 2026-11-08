@@ -3,7 +3,7 @@
 # dependencies = []
 # [tool.orcaslicer.plugin]
 # name = "Head Room"
-# version = "0.4.0"
+# version = "0.5.0"
 # description = "Create a personal head, try on a cosplay helmet and open the fitted shell in OrcaSlicer."
 # ///
 import base64
@@ -48,9 +48,9 @@ def validate_profile(value):
         decode_mesh(value.get("data"))
         return {"kind": "stl", "name": name, "data": value["data"]}
     values = value.get("values")
-    if value.get("kind") != "measured" or not isinstance(values, dict) or set(values) != PROFILE_KEYS:
+    if value.get("kind") != "measured" or not isinstance(values, dict) or not PROFILE_KEYS <= set(values) or set(values) - PROFILE_KEYS - {"eyeDrop","pupilGap","noseDepth","earLeft","earRight"}:
         raise ValueError("Complete all four measurements.")
-    if any(type(n) not in (int, float) or not math.isfinite(n) or not 10 <= n <= 1500 for n in values.values()):
+    if any(type(n) not in (int, float) or not math.isfinite(n) or not (10 if k in PROFILE_KEYS else 0) <= n <= 1500 for k,n in values.items()):
         raise ValueError("Invalid measurement.")
     return {"kind": "measured", "name": name, "values": values}
 
@@ -83,10 +83,72 @@ class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
 
     def shelf_action(self, folder, action, data):
         chunk_size = 384 * 1024
+        if action == "shelfImportHead":
+            key = data.get("id")
+            if not isinstance(key,str) or not (key=="current" or re.fullmatch(r"[0-9a-f]{32}",key)):
+                raise ValueError("Invalid head.")
+            profile = validate_profile(data.get("profile"))
+            with head_library(folder) as db:
+                row=db.execute("SELECT profile FROM heads WHERE id=?",(key,)).fetchone()
+                if row and json.loads(row[0])!=profile:
+                    raise ValueError("That head ID already belongs to another profile.")
+                db.execute("INSERT OR IGNORE INTO heads VALUES (?,?,?)",(key,profile["name"],json.dumps(profile,allow_nan=False)))
+            return {}
+        if action == "shelfRevealBackup":
+            path=getattr(self,"last_backup",None)
+            if not path or not path.is_file():
+                raise ValueError("The backup file could not be found.")
+            if sys.platform=="darwin":
+                subprocess.run(["/usr/bin/open","-R",str(path)],check=True,timeout=15)
+            elif sys.platform=="win32":
+                subprocess.Popen(["explorer.exe","/select,",str(path)])
+            else:
+                subprocess.Popen(["xdg-open",str(path.parent)])
+            return {}
+        if action == "shelfBackupBegin":
+            self.cancel_backup()
+            size=data.get("size")
+            if type(size) is not int or size<12:
+                raise ValueError("Invalid backup size.")
+            self.backup=tempfile.NamedTemporaryFile(mode="w+b",dir=folder,delete=False)
+            self.backup_size=size
+            return {}
+        if action in ("shelfBackupPart","shelfBackupEnd"):
+            stream=getattr(self,"backup",None)
+            if stream is None:
+                raise ValueError("No backup transfer in progress.")
+            try:
+                if action=="shelfBackupPart":
+                    part=data.get("data")
+                    if stream.tell()!=data.get("offset") or not isinstance(part,str) or len(part)>512*1024:
+                        raise ValueError("Invalid backup chunk.")
+                    raw=base64.b64decode(part,validate=True)
+                    if not raw or stream.tell()+len(raw)>self.backup_size:
+                        raise ValueError("Invalid backup size.")
+                    stream.write(raw)
+                    return {}
+                if stream.tell()!=self.backup_size:
+                    raise ValueError("Backup transfer incomplete.")
+                from datetime import datetime
+                path=folder/("Head-Room-"+datetime.now().strftime("%Y%m%d-%H%M%S")+"-"+os.urandom(3).hex()+".headroom")
+                stream.close()
+                os.rename(stream.name,path)
+                self.backup=None
+                self.last_backup=path
+                return {"path":str(path)}
+            except Exception:
+                self.cancel_backup()
+                raise
         with closing(sqlite3.connect(folder / "helmets.sqlite3")) as db, db:
             db.execute("CREATE TABLE IF NOT EXISTS helmets (id TEXT PRIMARY KEY, name TEXT, size INTEGER, thumb TEXT)")
             db.execute("CREATE TABLE IF NOT EXISTS parts (id TEXT, offset INTEGER, data BLOB, PRIMARY KEY(id,offset))")
             db.execute("CREATE TABLE IF NOT EXISTS fits (id TEXT, head TEXT, pose TEXT, PRIMARY KEY(id,head))")
+            db.execute("CREATE TABLE IF NOT EXISTS revisions (uid TEXT PRIMARY KEY, shell TEXT NOT NULL, head TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL, pose TEXT NOT NULL, created INTEGER NOT NULL, UNIQUE(shell,head,name,version))")
+            if action == "shelfVersions":
+                rows = [dict(uid=u,shell=k,head=h,name=n,version=v,pose=json.loads(p),created=c) for u,k,h,n,v,p,c in db.execute("SELECT * FROM revisions ORDER BY created DESC,rowid DESC")]
+                for k,h,p in db.execute("SELECT id,head,pose FROM fits"):
+                    rows.append(dict(uid="old:"+k+":"+h,shell=k,head=h,name="Original fit",version="v1",pose=json.loads(p)))
+                return {"items": rows}
             if action == "shelfList":
                 return {"items": [dict(id=i, name=n, size=s, thumb=t) for i,n,s,t in db.execute("SELECT * FROM helmets ORDER BY rowid DESC")]}
             key = data.get("id")
@@ -150,9 +212,26 @@ class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
                         raise ValueError("Invalid helmet transform.")
                 if any(n<=0 for n in pose["scale"]) or type(pose.get("uniform")) is not bool or type(pose.get("padding")) not in (int,float) or not 0<=pose["padding"]<=100:
                     raise ValueError("Invalid helmet scale or padding.")
-                db.execute("INSERT OR REPLACE INTO fits VALUES (?,?,?)", (key,head,json.dumps(pose,allow_nan=False)))
+                rev = data.get("revision")
+                if rev:
+                    uid,n,v = (rev.get(k) for k in ("uid","name","version"))
+                    if not isinstance(uid,str) or not re.fullmatch(r"[0-9a-f]{32}",uid) or not all(isinstance(a,str) and 0 < len(a.strip()) <= lim for a,lim in [(n,80),(v,30)]):
+                        raise ValueError("Enter a fit name and version.")
+                    try:
+                        db.execute("INSERT INTO revisions VALUES (?,?,?,?,?,?,?)",(uid,key,head,n,v,json.dumps(pose,allow_nan=False),int(rev.get("created",0))))
+                    except sqlite3.IntegrityError:
+                        raise ValueError("That fit version already exists. Choose another version.")
+                else:
+                    db.execute("INSERT OR IGNORE INTO fits VALUES (?,?,?)", (key,head,json.dumps(pose,allow_nan=False)))
             self.clear_shelf_upload()
             return {}
+
+    def cancel_backup(self):
+        stream=getattr(self,"backup",None)
+        if stream is not None:
+            stream.close()
+            Path(stream.name).unlink(missing_ok=True)
+            self.backup=None
 
     def clear_shelf_upload(self):
         if self.shelf_upload is not None:
@@ -200,7 +279,19 @@ class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
             raise ValueError("Invalid fitted STL.")
         temp = self.upload.name
         self.upload.close()
-        os.replace(temp, self.output)
+        # Exclusive creation: never overwrite a previous handoff, even with the same name.
+        original = self.output
+        for i in range(10000):
+            self.output = original if not i else original.with_name(f"{original.stem}-{i+1}{original.suffix}")
+            try:
+                with self.output.open("xb") as out, open(temp,"rb") as src:
+                    shutil.copyfileobj(src,out)
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise ValueError("Could not choose an unused output name.")
+        Path(temp).unlink(missing_ok=True)
         self.upload = None
         try:
             if sys.platform == "darwin":
@@ -231,7 +322,7 @@ class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
             if isinstance(action,str) and action.startswith("shelf"):
                 try:
                     result = self.shelf_action(folder, action, data)
-                except (ValueError, OSError, RuntimeError, TypeError, sqlite3.Error) as error:
+                except (ValueError, OSError, RuntimeError, TypeError, sqlite3.Error, subprocess.SubprocessError) as error:
                     self.clear_shelf_upload()
                     result = {"error": str(error)}
                 self.post_message({"type":"shelfReply", "requestId":data.get("requestId"), **result})
@@ -257,7 +348,7 @@ class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
                         raise ValueError("A different head already uses this ID.")
                 self.post_message({"type": "saved", "id": key})
             elif action == "export":
-                stl = folder / "head-room.stl"
+                stl = folder / ("head-room-" + os.urandom(5).hex() + ".stl")
                 write_atomic(stl, decode_mesh(data.get("data")))
                 self.post_message({"type": "exported", "path": str(stl)})
             elif action == "helmetBegin":
@@ -266,7 +357,7 @@ class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
                 self.append_chunk(data)
             elif action == "helmetOpen":
                 self.open_helmet()
-        except (ValueError, OSError, RuntimeError, TypeError, sqlite3.Error) as error:
+        except (ValueError, OSError, RuntimeError, TypeError, sqlite3.Error, subprocess.SubprocessError) as error:
             if data.get("type") in ("helmetBegin", "helmetChunk", "helmetOpen"):
                 self.cancel_upload()
             self.post_message({"type": "error", "message": str(error), "id": data.get("id")})

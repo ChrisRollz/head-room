@@ -92,6 +92,14 @@ canvas:focus-visible{outline:2px solid #e8bf78;outline-offset:-3px}canvas:active
 @media(max-width:720px){#head-room.fit-mode section{grid-template-columns:1fr;grid-template-rows:minmax(265px,46vh) auto}.library-mode #content{display:block}.library-mode #content>.actions{margin-top:16px}.portraits{grid-template-columns:repeat(auto-fit,minmax(min(100%,142px),1fr));gap:10px;margin-top:18px}.portrait-art{height:138px}}
 .empty-shelf{grid-column:1/-1;padding:22px;border:1px dashed #53655e;border-radius:12px}
 .helmet-tile .portrait-art{background:radial-gradient(ellipse at 52% 38%,#514d3c,#2a302f 77%)}
+#head-room dialog{color:#ecf5f2;background:#202c30;border:1px solid #526965;border-radius:15px;max-width:min(460px,92vw);width:100%;padding:24px;box-shadow:0 16px 54px #0007}
+dialog::backdrop{background:#10191bc9}#head-room dialog button{margin:8px 5px 0 0}dialog label input{display:block;margin-top:6px}
+#head-room .shell-card{align-self:start;min-width:0}.shell-card .head-tile{width:100%}.shell-card details{padding:0 6px}.shell-card details button{display:block;width:100%;font-size:13px;margin:5px 0;text-align:left;overflow-wrap:anywhere}
+#fitFooter{display:flex;gap:6px}#fitFooter button:first-child{width:auto;white-space:nowrap}#fitFooter button:last-child{flex:1;min-width:0}
+.zone{display:grid;grid-template-columns:18px 1fr auto;align-items:center;gap:4px;border-bottom:1px solid #3e4f50;padding:3px 0}
+.zone input{width:16px;height:16px;accent-color:#bda6f5}.zone button{text-align:left;background:transparent;border:0;padding:5px}.zone span{font-size:12px}
+#head-room #entryReadout{display:block;margin:8px 0}#head-room .cut-legend .foam-key::before{background:#c6abff}#head-room .cut-legend .eye-key::before{background:#54c9d7}
+@media(max-width:900px){#fitFooter button{padding:7px 8px;font-size:13px}}
 </style></head><body><main id="head-room"><header><span class="mark" aria-hidden="true"></span><h1>Head Room</h1></header>
 <section><div class="scene"><canvas id="view" aria-label="Head preview with measurement guides"></canvas><canvas id="surface" hidden aria-label="Helmet fitting viewport"></canvas><div id="fitTools" class="view-tools" role="group" aria-label="Helmet positioning" hidden><button type="button" data-tool="orbit" aria-pressed="true">Orbit</button><button type="button" data-tool="translate">Move</button><button type="button" data-tool="rotate">Rotate</button></div><div class="hud"><button type="button" id="resetView">Reset view</button><span>Drag to rotate</span></div></div>
 <div class="panel"><div id="content"></div><p id="status" class="status" role="status"></p><div id="fitFooter" hidden></div></div></section>
@@ -140,20 +148,29 @@ const HeadRoomGeometry = (() => {
       if(perimeter(w,l,mid)<c) low=mid; else high=mid;
     }
     const e=(low+high)/2, vertices=[], faces=[];
+    const eyeZ=measured.eyeDrop==null?.514:1-measured.eyeDrop/h;
+    const eyeX=measured.pupilGap==null?.41:measured.pupilGap/w;
     function bump(x,t,cx,ct,wx,wt) {return Math.exp(-(((x-cx)/wx)**2+((t-ct)/wt)**2));}
-    const levels=[...new Set([...Array.from({length:50},(_,i)=>i/50),.64])].sort((a,b)=>a-b);
+    const levels=[...new Set([...(Object.keys(measured).some(k=>!(k in defaults))?[.44,.38,Math.max(.02,Math.min(.98,eyeZ))]:[]),...Array.from({length:50},(_,i)=>i/50),.64])].sort((a,b)=>a-b);
+    function faceY(xn,t) {
+      return .095*bump(xn,t,0,.385,.21,.069)+.043*bump(xn,t,0,.465,.17,.12)
+         -.048*bump(Math.abs(xn),t,eyeX,eyeZ,.22,.057)+.019*bump(Math.abs(xn),t,.47,.425,.25,.075)
+         +.022*bump(xn,t,0,.227,.36,.036);
+    }
+    const noseBase=section(.38);
+    const naturalTip=l*(noseBase[2]-noseBase[1]/2-faceY(0,.38));
+    const noseShift=measured.noseDepth==null?0:l/2-measured.noseDepth-naturalTip;
     for(const t of levels) {
       const [sw,sl,shift]=section(t);
       for(let j=0;j<slices;j++){
         const a=j*2*Math.PI/slices, [x,y]=oval(a,w*sw,l*sl,e);
         const xn=x/(w/2), front=Math.max(0,-Math.sin(a))**5;
         const browFade=Math.max(0,Math.min(1,(.64-t)/.05));
-        const relief= .095*bump(xn,t,0,.385,.21,.069) + .043*bump(xn,t,0,.465,.17,.12)
-          - .048*bump(Math.abs(xn),t,.41,.514,.22,.057)
-          + .019*bump(Math.abs(xn),t,.47,.425,.25,.075)
-          + .022*bump(xn,t,0,.227,.36,.036);
-        const ear=browFade*.034*bump(Math.abs(Math.sin(a)),t,.12,.44,.13,.095);
-        vertices.push([x+Math.sign(x)*w*ear,y+l*(shift-front*browFade*relief),h*t]);
+        const relief=faceY(xn,t);
+        const protrusion=x>0?measured.earLeft:measured.earRight;
+        const ear=protrusion==null?w*browFade*.034*bump(Math.abs(Math.sin(a)),t,.12,.44,.13,.095):
+          protrusion*bump(Math.sin(a),t,0,.44,.18,.078);
+        vertices.push([x+Math.sign(x)*ear,y+l*(shift-front*browFade*relief)+front*noseShift*bump(xn,t,0,.38,.22,.08),h*t]);
       }
     }
     for(let row=0;row<levels.length-1;row++) for(let j=0;j<slices;j++){
@@ -167,7 +184,16 @@ const HeadRoomGeometry = (() => {
     const loop=vertices.slice(levels.indexOf(.64)*slices,(levels.indexOf(.64)+1)*slices);
     const guides={circumference:[...loop,loop[0]],width:[[-w/2,0,z],[w/2,0,z]],
       length:[[0,-l/2,z],[0,l/2,z]],height:[[0,-.28*l,0],[0,.034*l,h]]};
-    return {vertices,faces,guides,actual:{circumference:perimeter(w,l,e),width:w,length:l,height:h}};
+    const ez=eyeZ*h, gap=(measured.pupilGap??w*.41),sec=section(eyeZ);
+    const eyeY=l*(sec[2]-.5*sec[1]*Math.pow(Math.max(0,1-Math.pow(gap/(w*sec[0]),e)),1/e))-2;
+    const eyes=[[-gap/2,eyeY,ez],[gap/2,eyeY,ez]];
+    guides.eyeDrop=[[0,eyeY,h],[0,eyeY,ez]];guides.pupilGap=eyes;
+    guides.noseDepth=[[0,l/2,h*.38],[0,naturalTip+noseShift,h*.38]];
+    for(const [key,sign] of [['earLeft',1],['earRight',-1]]){
+      const x=w*.5*section(.44)[0],y=l*section(.44)[2];
+      guides[key]=[[sign*x,y,h*.44],[sign*(x+(measured[key]??w*.034)),y,h*.44]];
+    }
+    return {vertices,faces,guides,eyes:measured.eyeDrop!=null||measured.pupilGap!=null?eyes:null,actual:{circumference:perimeter(w,l,e),width:w,length:l,height:h}};
   }
   function binarySTL(mesh) {
     const data=new ArrayBuffer(84+50*mesh.faces.length), v=new DataView(data);
@@ -368,7 +394,7 @@ function createHelmetFitting(geometry) {
     const level=row.reduce((n,v,i)=>n+v*fit.origin[i],0)+(plane-fit.center[axis]-fit.offset[axis])/fit.scale[axis];
     return {headLines:cut.lines,shellLines:sliceSurface(fit.positions,row,level,p=>place(p,fit))};
   }
-  return {start, turn, preview, estimate, fittedSTL, bounds, crossSection, sliceRange};
+  return {start, turn, preview, estimate, fittedSTL, bounds, crossSection, sliceRange, sliceSurface};
 }
 if(typeof module!=='undefined'&&module.exports)module.exports=createHelmetFitting;
 </script><script>/**
@@ -2920,7 +2946,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */</script><script>// The same r128 orbit and local-space transformation handles as the Berserk fitting viewer.
 // Render only on interaction. The proxy has the shell's pose; neither the head nor the camera is its child.
-function createFitStudio(canvas,onPose){
+function createFitStudio(canvas,onPose,onPad){
   const T=window.THREE, ren=new T.WebGLRenderer({canvas,alpha:true,antialias:true});
   ren.setPixelRatio(Math.min(devicePixelRatio||1,2));ren.outputEncoding=T.sRGBEncoding;
   const scene=new T.Scene(),cam=new T.OrthographicCamera(-1,1,1,-1,.1,50000);
@@ -2938,6 +2964,28 @@ function createFitStudio(canvas,onPose){
   // Nearest shell surface only, so 50% means one translucent layer even on a thick-walled STL.
   const depthMat=new T.MeshBasicMaterial({colorWrite:false,side:T.DoubleSide});
   let active=null,skull,shell,depthShell,span=300,raf=0;
+  const overlayGroup=new T.Group();scene.add(overlayGroup);
+  let drawnRows=null,drawnFocus=null,drawnEyes=null,press=null;
+  const foamMats=[0xac91ef,0xff89a2].map(color=>new T.MeshBasicMaterial({color,side:T.DoubleSide}));
+  const markerMat=new T.MeshBasicMaterial({color:0x36e0ee,depthTest:false});
+  const eyeLineMat=new T.LineBasicMaterial({color:0x36e0ee,depthTest:false});
+  function clearOverlays(){for(const child of [...overlayGroup.children]){overlayGroup.remove(child);child.geometry.dispose();}drawnRows=drawnEyes=null;}
+  function overlays(rows,focus,eyes){
+    if((rows===drawnRows||!rows.length&&!drawnRows?.length)&&focus===drawnFocus&&eyes===drawnEyes)return;
+    clearOverlays();drawnRows=rows;drawnFocus=focus;drawnEyes=eyes;
+    rows.forEach((r,i)=>{if(!r)return;
+      const obj=new T.Mesh(geometry(r.positions),foamMats[Number(r.short)]);obj.userData.pad=i;
+      obj.renderOrder=.2;overlayGroup.add(obj);
+    });
+    if(eyes){const line=new T.Line(new T.BufferGeometry().setFromPoints(eyes.map(v=>new T.Vector3(...v))),eyeLineMat);line.renderOrder=2;overlayGroup.add(line);
+      for(const p of eyes){const dot=new T.Mesh(new T.SphereGeometry(2,10,8),markerMat);dot.position.fromArray(p);dot.renderOrder=2;overlayGroup.add(dot);}}
+    draw();
+  }
+  canvas.addEventListener('pointerdown',e=>{press=e.button===0&&!e.shiftKey?[e.clientX,e.clientY]:null;});
+  canvas.addEventListener('pointerup',e=>{if(!press||Math.hypot(e.clientX-press[0],e.clientY-press[1])>4||gizmo.object)return;
+    const rect=canvas.getBoundingClientRect(),ray=new T.Raycaster();
+    ray.setFromCamera(new T.Vector2(2*(e.clientX-rect.left)/rect.width-1,1-2*(e.clientY-rect.top)/rect.height),cam);
+    const hit=ray.intersectObjects(overlayGroup.children.filter(o=>o.userData.pad!=null))[0];if(hit)onPad(hit.object.userData.pad);});
   let navPress=false;
   canvas.addEventListener('pointerdown',e=>{navPress=e.shiftKey||e.ctrlKey||e.metaKey||e.button!==0;},true);
   const begin=gizmo.pointerDown.bind(gizmo);gizmo.pointerDown=p=>{if(!navPress)begin(p);};
@@ -2963,7 +3011,7 @@ function createFitStudio(canvas,onPose){
     orbit.target.fromArray(c);cam.position.fromArray(c).add(V.set(.53,-1,.27).normalize().multiplyScalar(span*3));
     cam.zoom=1;cam.updateProjectionMatrix();orbit.update();draw();}
   function geometry(pos){const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(pos,3));g.computeVertexNormals();return g;}
-  function stop(){gizmo.detach();active=null;for(const m of [skull,shell])if(m){scene.remove(m);m.geometry.dispose();}
+  function stop(){clearOverlays();gizmo.detach();active=null;for(const m of [skull,shell])if(m){scene.remove(m);m.geometry.dispose();}
     if(depthShell)scene.remove(depthShell);skull=shell=depthShell=null;orbit.enabled=true;}
   function start(f,head,headBytes){stop();active=f;
     let geom;
@@ -2978,7 +3026,7 @@ function createFitStudio(canvas,onPose){
     span=2.23*Math.max(radius(geom.attributes.position.array,[0,0,0]),radius(skull.geometry.attributes.position.array,f.center));
     apply();reset();tool('orbit');}
   function opacity(v){if(depthShell)depthShell.visible=v>0&&v<1;shellMat.opacity=v;shellMat.transparent=v<1;shellMat.depthWrite=v>=1;shellMat.needsUpdate=true;draw();}
-  return {start,apply,tool,reset,stop,opacity,draw};
+  return {start,apply,tool,reset,stop,opacity,draw,overlays};
 }
 
 // Render each library portrait from the wearer's mesh, even when WebGL is unavailable.
@@ -3018,7 +3066,7 @@ function meshPortrait(mesh,G,raw=null,helmet=false){
     const {right,sign,up}=planes[section.axis],delta=[0,0,0];
     delta[right]=sign*dx;delta[up]=dy;moveHelmet(delta);
   }
-  const poses={circumference:[-.45,.32],width:[0,.02],length:[1.45,.10],height:[1.33,.04]};
+  const poses={circumference:[-.45,.32],width:[0,.02],length:[1.45,.10],height:[1.33,.04],eyeDrop:[.45,0],pupilGap:[0,0],noseDepth:[1.49,0],earLeft:[.62,.09],earRight:[-.62,.09]};
   function reset(){zoom=1;pan=[0,0];[yaw,pitch]=section ? [section.axis===0?Math.PI/2:0,0] : poses[guide]||[-.38,.12];draw();}
   function draw(){
     if(!mesh)return;
@@ -3036,6 +3084,19 @@ function meshPortrait(mesh,G,raw=null,helmet=false){
           ctx.lineTo(w/2+pan[0]+sign*(b[right]-center[right])*scale,h*.49+pan[1]-(b[up]-center[up])*scale);
         }
         ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
+      }
+      for(const i of new Set(section.foam?.map(f=>f.i))){
+        const segments=section.foam.filter(f=>f.i===i).map(f=>f.line);
+        outline(segments,section.short?.includes(i)?'#ff8ca6':'#c6abff');
+        if(section.short?.includes(i)){ctx.setLineDash([3,4]);outline(segments,'#3b232e');ctx.setLineDash([]);}
+      }
+      if(section.eyes){
+        const [a,b]=section.eyes;ctx.setLineDash([5,5]);
+        if(section.axis!==2){
+          const aa=a.slice(),bb=b.slice();aa[right]=center[right]-extent*.45;bb[right]=center[right]+extent*.45;
+          outline([[aa,bb]],'#54c9d7');
+        }else if(Math.abs(a[2]-section.plane)<3)outline([[a,b]],'#54c9d7');
+        ctx.setLineDash([]);
       }
       outline(section.headLines,'#9de6ce');outline(section.shellLines,'#ffd084');
       return;
@@ -3127,8 +3188,8 @@ function createHelmetLibrary(bridge, encode, decode){
   function receive(reply){const done=waiting.get(reply.requestId);waiting.delete(reply.requestId);done?.(reply);}
   async function db(){
     if(!dbPromise)dbPromise=new Promise((resolve,reject)=>{
-      const r=indexedDB.open('head-room-helmets',1);
-      r.onupgradeneeded=()=>{for(const key of ['files','names','fits'])r.result.createObjectStore(key);};
+      const r=indexedDB.open('head-room-helmets',2);
+      r.onupgradeneeded=()=>{for(const key of ['files','names','fits','versions'])if(!r.result.objectStoreNames.contains(key))r.result.createObjectStore(key);};
       r.onsuccess=()=>{r.result.onversionchange=()=>{r.result.close();dbPromise=null;};resolve(r.result);};
       r.onerror=()=>{dbPromise=null;reject(r.error);};
     });
@@ -3140,7 +3201,7 @@ function createHelmetLibrary(bridge, encode, decode){
       tx.oncomplete=()=>resolve(result?.());tx.onabort=()=>reject(tx.error||Error('Helmet storage is unavailable.'));
     });
   }
-  async function save({id,name,bytes,thumb,head,pose}){
+  async function save({id,name,bytes,thumb,head,pose,revision}){
     if(!id){
       const key=crypto.subtle?new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)):crypto.getRandomValues(new Uint8Array(16));
       id=Array.from(key,n=>n.toString(16).padStart(2,'0')).join('');
@@ -3151,12 +3212,15 @@ function createHelmetLibrary(bridge, encode, decode){
       if(!exists)for(let offset=0;offset<size;offset+=CHUNK){
         await request('shelfChunk',{id,offset,data:encode(bytes.slice(offset,offset+CHUNK))});
       }
-      await request('shelfSave',{...meta,head,pose});return id;
+      await request('shelfSave',{...meta,head,pose,revision});return id;
     }
-    await transaction(['files','names','fits'],'readwrite',s=>{
+    await transaction(['files','names','fits','versions'],'readwrite',s=>{
       const existing=s('names').getKey(id);existing.onsuccess=()=>{
         if(existing.result===undefined){s('files').add(bytes,id);s('names').add(meta,id);}
-        if(head&&pose)s('fits').put(pose,[id,head]);
+        if(head&&pose&&revision){
+          const stamp=[id,head,revision.name,revision.version];
+          s('versions').add({...revision,head,shell:id,pose},stamp);
+        }else if(head&&pose)s('fits').add(pose,[id,head]);
       };
     });return id;
   }
@@ -3176,11 +3240,212 @@ function createHelmetLibrary(bridge, encode, decode){
       }return {bytes:result.buffer,pose};
     }
     return transaction(['files','fits'],'readonly',s=>{
-      const data=s('files').get(id),fit=s('fits').get([id,head]);return ()=>({bytes:data.result,pose:fit.result});
+      const data=s('files').get(id),fit=s('fits').get([id,head||'']);return ()=>({bytes:data.result,pose:fit.result});
     });
   }
-  return {list,get,save,receive};
+  async function versions(){
+    if(bridge)return (await request('shelfVersions')).items;
+    return transaction(['fits','versions'],'readonly',s=>{
+      const v=s('versions').getAll(),keys=s('fits').getAllKeys(),p=s('fits').getAll();
+      return ()=>v.result.concat(keys.result.map(([shell,head],i)=>({uid:'old:'+shell+':'+head,shell,head,name:'Original fit',version:'v1',pose:p.result[i]})));
+    });
+  }
+  return {list,get,save,receive,request,versions};
 }
+</script><script>// Distances refer to uncompressed foam at the center of each pad, not a whole-shell fit verdict.
+const Clearances=(()=>{
+  const zones=['Left temple','Right temple','Forehead','Back','Crown'];
+  const axes=[[1,0,0],[-1,0,0],[0,-1,0],[0,1,0],[0,0,1]];
+  const dot=(a,b)=>a.reduce((s,n,i)=>s+n*b[i],0),norm=v=>{const n=Math.hypot(...v);return v.map(x=>x/n);};
+  const plus=(a,b,k=1)=>a.map((n,i)=>n+k*b[i]),sub=(a,b)=>plus(a,b,-1);
+  const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+  function vector(f,v,inverse=false){
+    const r=f.rotation,s=f.scale;
+    return inverse?[0,1,2].map(i=>r[i]*v[0]/s[0]+r[3+i]*v[1]/s[1]+r[6+i]*v[2]/s[2]):
+      [0,1,2].map(i=>s[i]*(r[3*i]*v[0]+r[3*i+1]*v[1]+r[3*i+2]*v[2]));
+  }
+  // Möller–Trumbore, both signs, no allocation per triangle. Distances use input ray units.
+  function hits(p,o,d){
+    const out=[],[dx,dy,dz]=d;
+    for(let i=0;i<p.length;i+=9){
+      const ax=p[i],ay=p[i+1],az=p[i+2],ex=p[i+3]-ax,ey=p[i+4]-ay,ez=p[i+5]-az,fx=p[i+6]-ax,fy=p[i+7]-ay,fz=p[i+8]-az;
+      const hx=dy*fz-dz*fy,hy=dz*fx-dx*fz,hz=dx*fy-dy*fx,det=ex*hx+ey*hy+ez*hz;if(Math.abs(det)<1e-10)continue;
+      const x=o[0]-ax,y=o[1]-ay,z=o[2]-az,u=(x*hx+y*hy+z*hz)/det;if(u< -1e-8||u>1.00000001)continue;
+      const qx=y*ez-z*ey,qy=z*ex-x*ez,qz=x*ey-y*ex,v=(dx*qx+dy*qy+dz*qz)/det;
+      if(v< -1e-8||u+v>1.00000001)continue;
+      out.push((fx*qx+fy*qy+fz*qz)/det);
+    }
+    out.sort((a,b)=>a-b);return out.filter((n,i)=>!i||Math.abs(n-out[i-1])>.005);
+  }
+  function anchors(f){
+    const size=f.headBounds[1].map((n,i)=>n-f.headBounds[0][i]);
+    return axes.map((axis,i)=>{
+      // Crown crests and visor slots often coincide with symmetry axes. Try nearby
+      // attachment sites within the same anatomical zone, never bridge an opening.
+      const candidates=i===4?[[0,0,0],[.045,0,0],[-.045,0,0],[.09,.035,0],[-.09,.035,0],[0,.10,0]]:
+        (i===2?[.16,.22,.28,.30]:[.10,.14,.06]).flatMap(z=>[0,.05,-.05].map(t=>i<2?[0,t,z]:[t,0,z]));
+      for(const c of candidates){
+        const off=c.map((v,j)=>v*size[j]),local=plus(f.origin,vector(f,off,true)),dir=vector(f,axis,true);
+        const positive=hits(f.positions,local,dir).filter(n=>n>0);
+        if(positive.length===2)return {p:plus(local,dir,positive[0]),d:norm(dir)};
+      }
+      return null;
+    });
+  }
+  function headSurface(mesh,raw,G){if(raw)return G.surface(raw);
+    const a=new Float32Array(mesh.faces.length*9);
+    mesh.faces.forEach((f,i)=>f.forEach((v,j)=>a.set(mesh.vertices[v],i*9+j*3)));return a;
+  }
+  function sample(f,a,surface){
+    const dir=norm(vector(f,a.d)),p=plus(plus(f.center,f.offset),vector(f,sub(a.p,f.origin)));
+    const distances=hits(surface,p,dir);
+    return {p,dir,gap:distances.length?-distances[distances.length-1]:null};
+  }
+  function inspect(f,surface,thickness,enabled){
+    if(!thickness)return [];
+    f.padAnchors??=anchors(f);
+    const key=JSON.stringify([f.scale,f.rotation,f.offset,thickness,enabled,f.padAnchors]);
+    if(f.padCache?.key===key)return f.padCache.rows;
+    const rows=f.padAnchors.map((a,i)=>{
+      if(!enabled.includes(i)||!a)return null;
+      const s=sample(f,a,surface),u=norm(cross(s.dir,Math.abs(s.dir[2])>.85?[1,0,0]:[0,0,1])),v=cross(s.dir,u);
+      const radius=Math.min(14,...f.headBounds[1].map((n,j)=>(n-f.headBounds[0][j])*.085));
+      const tris=[],ring=(j,k)=>plus(plus(plus(s.p,s.dir,-k*thickness),u,radius*Math.cos(j*Math.PI/12)),v,radius*Math.sin(j*Math.PI/12));
+      for(let j=0;j<24;j++){
+        const a=ring(j,0),b=ring(j+1,0),c=ring(j,1),d=ring(j+1,1);
+        tris.push(...s.p,...a,...b,...plus(s.p,s.dir,-thickness),...d,...c,...a,...c,...d,...a,...d,...b);
+      }
+      return {...s,short:s.gap!=null&&s.gap<thickness,positions:new Float32Array(tris)};
+    });
+    f.padCache={key,rows};return rows;
+  }
+  function suggest(f,surface,thickness,enabled){
+    if(!enabled.length)throw Error('Choose at least one pad location.');
+    f.padAnchors??=anchors(f);
+    if(enabled.some(i=>!f.padAnchors[i]))throw Error('An opening or extra wall prevents a scale suggestion at a selected pad. Check that location in a cut, or deselect it.');
+    const room=k=>{
+      const t={...f,scale:f.scale.map(x=>x*k)};
+      return enabled.every(i=>{const gap=sample(t,f.padAnchors[i],surface).gap;return gap!==null&&gap>=thickness;});
+    };
+    let hi=1;while(hi<4&&!room(hi))hi*=1.15;
+    if(!room(hi))throw Error('Could not find a supported fit. Align the shell and inspect the cuts.');
+    let lo=.05;for(let n=0;n<17;n++){const k=(lo+hi)/2;if(room(k))hi=k;else lo=k;}
+    const result=f.scale.map(x=>x*hi);if(result.some(n=>n<.05||n>10))throw Error('Suggested scale is outside the supported range.');return result;
+  }
+  return {zones,anchors,inspect,headSurface,suggest};
+})();
+if(typeof module!=='undefined'&&module.exports)module.exports=Clearances;
+</script><script>// Build a 4-mm tall physical gauge from a closed horizontal section (with its original opening).
+function entryGauge(lines,T){
+  const key=p=>Math.round(p[0]*1000)+','+Math.round(p[1]*1000), graph=new Map(), points=new Map();
+  for(const [p,q] of lines){
+    const a=key(p),b=key(q);if(a===b)continue;
+    for(const [x,y,v] of [[a,b,p],[b,a,q]]){if(!graph.has(x))graph.set(x,new Set());graph.get(x).add(y);points.set(x,v);}
+  }
+  const fail=()=>{throw Error('No single closed entry ring at this height. Sweep to a continuous band above the rim.');};
+  if(!graph.size||[...graph.values()].some(n=>n.size!==2))fail();
+  const loops=[],seen=new Set();
+  for(const start of graph.keys()){if(seen.has(start))continue;let cur=start,prev=null;const loop=[];
+    do{if(seen.has(cur))fail();seen.add(cur);let p=points.get(cur);loop.push(new T.Vector2(p[0],p[1]));
+      const next=[...graph.get(cur)].find(n=>n!==prev);prev=cur;cur=next;
+    }while(cur!==start);
+    // Adjacent triangles often split a straight edge. Remove those points from both
+    // walls and caps so triangulation cannot leave a T junction in the printable STL.
+    let changed=true;
+    while(changed&&loop.length>3){changed=false;
+      for(let j=loop.length-1;j>=0&&loop.length>3;j--){
+        const a=loop[(j+loop.length-1)%loop.length],b=loop[j],c=loop[(j+1)%loop.length];
+        if(Math.abs((b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x))<=1e-7*Math.max(1,a.distanceTo(c))){
+          loop.splice(j,1);changed=true;}
+      }}
+    if(loop.length<3)fail();loops.push(loop);
+  }
+  if(loops.length<1||loops.length>2)fail();
+  loops.sort((a,b)=>Math.abs(T.ShapeUtils.area(b))-Math.abs(T.ShapeUtils.area(a)));
+  const outer=loops[0],hole=loops[1]||[];
+  function inside(p,loop){let yes=false;for(let i=0,j=loop.length-1;i<loop.length;j=i++){
+    const a=loop[i],b=loop[j];if((a.y>p.y)!==(b.y>p.y)&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)yes=!yes;}return yes;}
+  let openSpan;
+  if(!hole.length){
+    // An open-front visor can be a single C-shaped section. Preserve the opening
+    // instead of fabricating a bridge or reporting a fictitious closed diameter.
+    const bounds=['x','y'].map(k=>outer.reduce(([lo,hi],p)=>[Math.min(lo,p[k]),Math.max(hi,p[k])],[Infinity,-Infinity]));
+    const [x,y]=bounds.map(([lo,hi])=>(lo+hi)/2),area=Math.abs(T.ShapeUtils.area(outer));
+    if(inside({x,y},outer)||area>(bounds[0][1]-bounds[0][0])*(bounds[1][1]-bounds[1][0])*.45)fail();
+    function clear(a,b,m,n){const hits=[];
+      for(let i=0;i<outer.length;i++){
+        const p=outer[i],q=outer[(i+1)%outer.length];if((p[b]>n)===(q[b]>n))continue;
+        hits.push(p[a]+(q[a]-p[a])*(n-p[b])/(q[b]-p[b]));}
+      const lo=hits.filter(v=>v<m),hi=hits.filter(v=>v>m);
+      return lo.length>=2&&hi.length>=2?Math.min(...hi)-Math.max(...lo):null;
+    }
+    openSpan=[clear('x','y',x,y),clear('y','x',y,x)];if(!openSpan.some(v=>v>0))fail();
+  }else if(!hole.every(p=>inside(p,outer)))fail();
+  if(T.ShapeUtils.isClockWise(outer))outer.reverse();if(hole.length&&!T.ShapeUtils.isClockWise(hole))hole.reverse();
+  const cap=T.ShapeUtils.triangulateShape(outer,hole.length?[hole]:[]),all=outer.concat(hole),n=all.length;
+  const vertices=[0,4].flatMap(z=>all.map(p=>[p.x,p.y,z])),faces=[];
+  for(const [a,b,c] of cap)faces.push([a,c,b],[a+n,b+n,c+n]);
+  for(const [loop,start] of [[outer,0],[hole,outer.length]])for(let i=0;i<loop.length;i++){
+    const a=start+i,b=start+(i+1)%loop.length;faces.push([a,b,b+n],[a,b+n,a+n]);}
+  const edgeCounts=new Map();for(const tri of faces)for(let j=0;j<3;j++){
+    const a=tri[j],b=tri[(j+1)%3],key=a<b?a+':'+b:b+':'+a;edgeCounts.set(key,(edgeCounts.get(key)||0)+1);}
+  if([...edgeCounts.values()].some(v=>v!==2))fail();
+  const span=k=>{let lo=Infinity,hi=-Infinity;for(const p of hole){lo=Math.min(lo,p[k]);hi=Math.max(hi,p[k]);}return hi-lo;};
+  return {vertices,faces,open:!hole.length,width:openSpan?openSpan[0]:span('x'),depth:openSpan?openSpan[1]:span('y')};
+}
+if(typeof module!=='undefined'&&module.exports)module.exports=entryGauge;
+</script><script>// Portable archive: header + length-prefixed JSON catalogue + original shell bytes.
+const HeadArchive=(()=>{
+  const enc=new TextEncoder(),dec=new TextDecoder(),magic='HEADRM01',Max=96*1024*1024;
+  const digest=async b=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',b)),v=>v.toString(16).padStart(2,'0')).join('');
+  const idOk=s=>typeof s==='string'&&/^(?:[0-9a-f]{32}|[0-9a-f]{64})$/.test(s);
+  const headId=s=>s==='current'||(idOk(s)&&s.length===32);
+  function validPose(p){
+    const numbers=(a,n)=>Array.isArray(a)&&a.length===n&&a.every(Number.isFinite);
+    return p&&numbers(p.rotation,9)&&numbers(p.offset,3)&&numbers(p.scale,3)&&p.scale.every(n=>n>=.05&&n<=10)
+      &&typeof p.uniform==='boolean'&&Number.isFinite(p.padding)&&p.padding>=0&&p.padding<=100
+      &&(!p.zones||Array.isArray(p.zones)&&p.zones.every(n=>Number.isInteger(n)&&n>=0&&n<5))
+      &&(!p.anchors||Array.isArray(p.anchors)&&p.anchors.length===5&&p.anchors.every(a=>a===null||a&&numbers(a.p,3)&&numbers(a.d,3)&&Math.hypot(...a.d)>0));
+  }
+  async function pack(heads,getHead,shelf,progress){
+    const catalog={heads:[],shells:[],versions:await shelf.versions()},parts=[];
+    for(const {id} of heads)catalog.heads.push({id,profile:await getHead(id)});
+    for(const item of await shelf.list()){
+      progress('Backing up '+item.name+'…');const {bytes}=await shelf.get(item,null);
+      catalog.shells.push({...item,sha:await digest(bytes)});parts.push(bytes);
+    }
+    const json=enc.encode(JSON.stringify(catalog)),prefix=new Uint8Array(12);prefix.set(enc.encode(magic));
+    new DataView(prefix.buffer).setUint32(8,json.length,true);return new Blob([prefix,json,...parts],{type:'application/octet-stream'});
+  }
+  function profileOK(p){
+    if(!p||typeof p.name!=='string'||!p.name.trim()||p.name.length>80)return false;
+    if(p.kind==='stl')return typeof p.data==='string'&&p.data.length<=44739244;
+    const keys=['circumference','width','length','height'],extra=['eyeDrop','pupilGap','noseDepth','earLeft','earRight'];
+    return p.kind==='measured'&&p.values&&keys.every(k=>k in p.values)&&Object.entries(p.values).every(([k,v])=>(keys.includes(k)||extra.includes(k))&&Number.isFinite(v)&&v>=(keys.includes(k)?10:0)&&v<=1500);
+  }
+  async function unpack(file,G,decode){
+    const bad=()=>{throw Error('This is not a complete Head Room library backup.');};
+    const prefix=await file.slice(0,12).arrayBuffer();if(prefix.byteLength!==12||dec.decode(prefix.slice(0,8))!==magic)bad();
+    const end=12+new DataView(prefix).getUint32(8,true);if(end>file.size||end>256*1024*1024)bad();
+    const data=JSON.parse(await file.slice(12,end).text());let off=end;
+    if(!data||!['heads','shells','versions'].every(k=>Array.isArray(data[k])))bad();
+    const heads=new Set(),shells=new Set(),uids=new Set();
+    for(const {id,profile:p} of data.heads){if(!headId(id)||heads.has(id)||!profileOK(p))bad();heads.add(id);if(p.kind==='stl')G.inspectSTL(decode(p.data));}
+    for(const s of data.shells){
+      if(!idOk(s.id)||shells.has(s.id)||!Number.isInteger(s.size)||s.size<=0||s.size>Max||off+s.size>file.size||typeof s.name!=='string'||!s.name.length||s.name.length>255||typeof s.thumb!=='string'||!s.thumb.startsWith('data:image/png;base64,')||s.thumb.length>262144)bad();
+      shells.add(s.id);s.blob=file.slice(off,off+s.size);off+=s.size;
+      const bytes=await s.blob.arrayBuffer(),sha=await digest(bytes);if(sha!==s.sha||s.id.length===64&&s.id!==sha)bad();
+      G.inspectSTL(bytes);
+    }
+    if(off!==file.size)bad();
+    for(const v of data.versions){
+      if(!heads.has(v.head)||!shells.has(v.shell)||uids.has(v.uid)||!(idOk(v.uid)&&v.uid.length===32||v.uid==='old:'+v.shell+':'+v.head)||typeof v.name!=='string'||!v.name.trim()||v.name.length>80||typeof v.version!=='string'||!v.version.trim()||v.version.length>30||!validPose(v.pose))bad();
+      uids.add(v.uid);
+    }
+    return data;
+  }
+  return {pack,unpack,digest};
+})();
 </script><script>(() => {
   const G=HeadRoomGeometry, $=id=>document.getElementById(id);
   const view=createHeadView($('view'),moveInCut), panel=$('content'), status=$('status');
@@ -3190,12 +3455,68 @@ function createHelmetLibrary(bridge, encode, decode){
     ['length','Brow to back','Measure straight from the brow between your eyebrows to the farthest point at the back of your skull.'],
     ['height','Chin to crown','Look straight ahead. Measure the vertical distance from the underside of your chin to the top of your head.']
   ];
+  const extra=[
+    ['eyeDrop','Crown to eye line','Look straight ahead. Measure vertically from a level book on your crown to the height of your pupils.'],
+    ['pupilGap','Pupil distance','Looking straight ahead, measure the distance between pupil centers with a helper or use your known distance PD. Useful for separate eyeholes.'],
+    ['noseDepth','Back of head to nose tip','With the back of your head lightly against a wall, measure straight forward to your nose tip. Use the same rear reference as brow to back.'],
+    ['earLeft','Left ear stand-off','On your left, measure straight out from the side of your head to the outer rim of the ear at its widest point. Do not press the ear flat.'],
+    ['earRight','Right ear stand-off','Repeat on your right. These two values can differ.']
+  ];
   let heads=[], selectedId=null, draftId=null, profile=null, mesh, raw=null, step=0, unit='mm', pending=false;
   const unitSize={mm:1,cm:10,in:25.4};
   const native=window.orca&&typeof window.orca.postMessage==='function';
   const shelf=createHelmetLibrary(native?window.orca:null,base64,from64);
   let queuedHelmet=null,activeHelmetId=null,shelfBusy=false;
   const fitter=createHelmetFitting(G);
+  let selectedVersion=null,zoneIds=[0,1,2,3,4],padSurface=null,highlightZone=null,saveFingerprint='',currentRows=[],proposal=null;
+  const uid=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),v=>v.toString(16).padStart(2,'0')).join('');
+  const poseNow=()=>({offset:fit.offset.slice(),rotation:fit.rotation.slice(),scale:fit.scale.slice(),uniform,padding,zones:zoneIds.slice(),anchors:fit.padAnchors||null});
+  const samePose=()=>selectedVersion&&saveFingerprint===JSON.stringify(poseNow());
+  function dialog(title,build){
+    const d=document.createElement('dialog'),h=document.createElement('h2');h.textContent=title;d.setAttribute('aria-label',title);d.append(h);workspace.append(d);
+    const close=()=>d.close();d.addEventListener('close',()=>d.remove(),{once:true});build(d,close);d.showModal();return d;
+  }
+  function downloadBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),10000);}
+  function libraryBackup(){
+    dialog('Library backup',(d,close)=>{
+      const copy=document.createElement('p'),msg=document.createElement('p'),restore=document.createElement('input');
+      copy.textContent='Take your heads, original helmets, and fitted versions with you. Restoring adds missing items and keeps existing files.';
+      msg.setAttribute('role','status');restore.type='file';restore.accept='.headroom';restore.hidden=true;
+      async function run(job){d.querySelectorAll('button').forEach(b=>b.disabled=true);try{await job();}catch(err){msg.textContent=err.message;}finally{d.querySelectorAll('button').forEach(b=>b.disabled=false);}}
+      const report=t=>msg.textContent=t;
+      const backup=button('Back up library',()=>run(async()=>{
+        report('Preparing backup…');const archive=await HeadArchive.pack(heads,fetchHead,shelf,report);
+        if(!native){downloadBlob(archive,'Head-Room-'+new Date().toISOString().slice(0,10)+'.headroom');report('Backup downloaded. Keep it outside the plugin folder.');return;}
+        await shelf.request('shelfBackupBegin',{size:archive.size});
+        for(let off=0;off<archive.size;off+=384*1024)await shelf.request('shelfBackupPart',{offset:off,data:base64(await archive.slice(off,off+384*1024).arrayBuffer())});
+        const result=await shelf.request('shelfBackupEnd');report('Backup ready. Copy this file to a folder you keep before uninstalling:');
+        const path=document.createElement('input');path.readOnly=true;path.value=result.path;path.onfocus=()=>path.select();msg.append(path);
+        const reveal=button('Show backup file',()=>shelf.request('shelfRevealBackup').catch(e=>report(e.message)));msg.append(reveal);
+      }),true);
+      const canonical=p=>JSON.stringify(p,Object.keys(flatKeys(p)).sort());
+      function flatKeys(v,out={}){if(v&&typeof v==='object')for(const k of Object.keys(v)){out[k]=true;flatKeys(v[k],out);}return out;}
+      restore.onchange=()=>{const file=restore.files[0];restore.value='';if(!file)return;run(async()=>{
+        report('Checking the backup…');const data=await HeadArchive.unpack(file,G,from64);
+        const existing=await shelf.list(),versions=await shelf.versions(),knownHeads=new Set(heads.map(h=>h.id)),shellIds=new Set(existing.map(i=>i.id)),known=new Set(versions.map(v=>v.uid));
+        for(const h of data.heads)if(knownHeads.has(h.id)&&canonical(h.profile)!==canonical(await fetchHead(h.id)))throw Error('A head conflicts with this backup. Your library was left unchanged.');
+        for(const s of data.shells)if(shellIds.has(s.id)&&s.id.length!==64&&await HeadArchive.digest((await shelf.get(existing.find(i=>i.id===s.id),null)).bytes)!==s.sha)throw Error('Different original helmet uses the same ID.');
+        for(const v of data.versions){const prior=versions.find(x=>x.uid===v.uid||x.shell===v.shell&&x.head===v.head&&x.name===v.name&&x.version===v.version);
+          if(prior&&(prior.uid!==v.uid||canonical(prior.pose)!==canonical(v.pose)))throw Error('A fitted version conflicts with this backup. Your library was left unchanged.');}
+        for(const h of data.heads)if(!knownHeads.has(h.id)){
+          if(native)await shelf.request('shelfImportHead',h);else await browserSave(h.id,h.profile);
+          heads.unshift({id:h.id,name:h.profile.name});
+        }
+        for(const s of data.shells){const missing=data.versions.filter(v=>v.shell===s.id&&!known.has(v.uid));
+          if(shellIds.has(s.id)&&!missing.length)continue;
+          const bytes=await s.blob.arrayBuffer();report('Restoring '+s.name+'…');
+          if(!shellIds.has(s.id))await shelf.save({...s,bytes,head:null,pose:null});
+          for(const v of missing)await shelf.save({...s,bytes,head:v.head,pose:v.pose,revision:v.uid.startsWith('old:')?null:{name:v.name,version:v.version,uid:v.uid,created:v.created||0}});
+        }
+        report('Library restored. Existing items were kept.');home();
+      });};
+      d.append(copy,backup,button('Restore backup…',()=>restore.click()),restore,msg,button('Done',close));
+    });
+  }
   let fit=null, helmetName='', sectionMode='3D', uniform=true, padding=0, transfer=null;
   const cuts={
     'Front section':{axis:1,label:'Slice depth',ends:['Front','Back']},
@@ -3255,7 +3576,7 @@ function createHelmetLibrary(bridge, encode, decode){
     field('h2',heads.length?'Your heads':'Choose a head');
     if(heads.length||queuedHelmet)field('p',queuedHelmet?'Choose a head for '+queuedHelmet.name+'.':'Choose a head to try on a helmet.').className='library-intro';
     const make=button('Make my head',()=>{draftId=null;profile={kind:'measured',name:'My head',values:{}};raw=null;step=0;wizard();},!heads.length);
-    const scan=button('Use my own STL',()=>$('file').click());buttons(make,scan,button(queuedHelmet?'Back to helmets':'Helmets',()=>showHelmets(false)));
+    const scan=button('Use my own STL',()=>$('file').click());buttons(make,scan,button(queuedHelmet?'Back to helmets':'Helmets',()=>showHelmets(false)),button('Library backup',libraryBackup));
     if(!heads.length){view.show(G.generate(),null,true);return;}
     const grid=document.createElement('div');grid.className='portraits';panel.append(grid);
     const counts=new Map(),labels=new Map();
@@ -3294,8 +3615,8 @@ function createHelmetLibrary(bridge, encode, decode){
   }
   function wizard(){
     layout('editor');tools.hidden=true;
-    const [key,title,instruction]=steps[step];panel.replaceChildren();note();
-    const progress=field('p','Measurement '+(step+1)+' of 4');progress.className='step';
+    const optional=step>=4,[key,title,instruction]=[...steps,...extra][step];panel.replaceChildren();note();
+    const progress=field('p',optional?'Optional detail '+(step-3)+' of '+extra.length:'Measurement '+(step+1)+' of 4');progress.className='step';
     field('h2',title);field('p',instruction);
     const label=field('label','Your measurement');label.htmlFor='distance';
     const row=document.createElement('div');row.className='row';
@@ -3304,27 +3625,31 @@ function createHelmetLibrary(bridge, encode, decode){
     for(const u of Object.keys(unitSize))units.add(new Option(u,u));units.value=unit;
     function display(){input.value=profile.values[key]===undefined?'':String(Number((profile.values[key]/unitSize[unit]).toFixed(3)));}
     display();row.append(input,units);panel.append(row);
-    const go=button(step===3?'Review my head':'Next',()=>{if(go.disabled)return;if(step===3)review(false);else{step++;wizard();}},true);
+    const onward=()=>{if(step===3||step===3+extra.length)review(false);else{step++;wizard();}};
+    const go=button(step===3||step===3+extra.length?'Review my head':'Next',onward,true);
+    const range={eyeDrop:[1,profile.values.height*.85],pupilGap:[1,profile.values.width*.95],noseDepth:[profile.values.length*.5,profile.values.length*1.9],earLeft:[0,55],earRight:[0,55]}[key]||[10,1500];
+    const valid=n=>Number.isFinite(n)&&n>=range[0]&&n<=range[1];
     function update(){
       const mm=parseValue(input.value);
-      if(!Number.isFinite(mm)||mm<10||mm>1500){go.disabled=true;note(input.value?'Check the number and units. You can type 58 cm or 22.8 in.':'');return false;}
+      if(!valid(mm)){go.disabled=true;note(input.value?'Check the units. Expected '+Math.ceil(range[0])+'–'+Math.floor(range[1])+' mm.':'');return false;}
       profile.values[key]=mm;mesh=G.generate(profile.values);view.show(mesh,key);go.disabled=false;note();return true;
     }
     units.onchange=()=>{
       const previous=parseValue(input.value);
       unit=units.value;
-      if(Number.isFinite(previous)&&previous>=10&&previous<=1500){
+      if(valid(previous)){
         profile.values[key]=previous;display();go.disabled=false;note();
       }else if(input.value.trim())update();
     };
     input.oninput=update;input.onkeydown=e=>{if(e.key==='Enter'&&!go.disabled)go.click();};
     buttons(button('Back',()=>{
-      if(step>0){step--;wizard();return;}
+      if(step===4){review(false);return;}if(step>0){step--;wizard();return;}
       if(editingOriginal){
         profile=editingOriginal;editingOriginal=null;mesh=G.generate(profile.values);review(true);
       }else home();
     }),go);
-    go.disabled=profile.values[key]===undefined;
+    if(optional)buttons(button('Skip this measurement',()=>{delete profile.values[key];mesh=G.generate(profile.values);onward();}),button('Done with details',()=>{mesh=G.generate(profile.values);review(false);}));
+    go.disabled=!valid(profile.values[key]);
     mesh=G.generate(profile.values);view.show(mesh,key,true);input.focus();
   }
   function exportMesh(){
@@ -3381,8 +3706,12 @@ function createHelmetLibrary(bridge, encode, decode){
   }
   function savedOK(id){
     if(!pending||id!==draftId)return;
+    const previous=editingOriginal&&fit&&fitOwner===selectedId?{bytes:fit.bytes,name:helmetName,id:activeHelmetId,pose:poseNow()}:null;
     pending=false;selectedId=id;editingOriginal=null;discardFit();
     if(!heads.some(h=>h.id===id))heads.unshift({id,name:profile.name});
+    if(previous&&!queuedHelmet){
+      startFit(previous.bytes,previous.name,previous.id,previous.pose);note('Head revision saved. The helmet is a new draft; the earlier fit is unchanged.');return;
+    }
     tryOn();if(queuedHelmet)openStored(queuedHelmet);else note('Added to your saved heads.');
   }
   function failed(e){
@@ -3395,7 +3724,7 @@ function createHelmetLibrary(bridge, encode, decode){
     layout('editor');tools.hidden=true;panel.replaceChildren();note();view.show(mesh,null,true);field('h2',isSaved?profile.name:'Review your head');
     if(profile.kind==='measured'){
       const list=document.createElement('dl');list.className='values';
-      for(const [key,title] of steps){const d=document.createElement('div'),t=document.createElement('dt'),v=document.createElement('dd');
+      for(const [key,title] of [...steps,...extra]){if(profile.values[key]==null)continue;const d=document.createElement('div'),t=document.createElement('dt'),v=document.createElement('dd');
         t.textContent=title;v.textContent=Number(profile.values[key].toFixed(2))+' mm';d.append(t,v);list.append(d);}
       panel.append(list);
       if(Math.abs(mesh.actual.circumference-profile.values.circumference)>1)
@@ -3403,13 +3732,15 @@ function createHelmetLibrary(bridge, encode, decode){
     }else{const size=mesh.maxs.map((v,i)=>(v-mesh.mins[i]).toFixed(1));field('p','STL dimensions (X × Y × Z) '+size.join(' × ')+' mm. Coordinates are interpreted in millimetres.');}
     if(isSaved){
       buttons(button(fit?'Resume fitting':'Try on a helmet',fit?fitPanel:tryOn,true),button('Export head STL',exportMesh));
-      if(profile.kind==='measured')buttons(button('Edit measurements as new head',()=>{editingOriginal=profile;profile=structuredCopy(profile);draftId=null;step=0;wizard();}));
+      if(profile.kind==='measured')buttons(button('Modify head',modifyHead));
       buttons(button('Back to heads',home));return;
     }
+    if(profile.kind==='measured')buttons(button('Refine visor and ear fit',()=>{step=4;wizard();}));
+    if(editingOriginal)field('p','This revision keeps the previous head and its fitted helmets.').className='hint';
     const l=field('label','Head name');l.htmlFor='headName';const name=document.createElement('input');name.id='headName';name.maxLength=80;name.value=profile.name;panel.append(name);
     name.oninput=()=>{profile.name=name.value;};
     name.onkeydown=e=>{if(e.key==='Enter')save();};
-    const b=button('Add to saved heads',save,true);b.id='save';
+    const b=button(editingOriginal?'Save head revision':'Add to saved heads',save,true);b.id='save';
     buttons(button('Back',()=>{if(profile.kind==='measured'){step=3;wizard();}else home();}),b);
   }
   $('file').onchange=async e=>{
@@ -3421,6 +3752,16 @@ function createHelmetLibrary(bridge, encode, decode){
       mesh=m;raw=bytes;draftId=null;profile={kind:'stl',name:f.name.replace(/\.stl$/i,''),data:base64(bytes)};review(false);
     }catch(err){if(read===fileRead)note(err.message);}
   };
+  function measuredCopy(){
+    draftId=null;editingOriginal=null;raw=null;profile={kind:'measured',name:(profile.name.slice(0,66)+' · measured'),values:{}};
+    step=0;wizard();note('The imported STL stays in your library. Measure the wearer to create this editable head.');
+  }
+  function modifyHead(){
+    editingOriginal=profile;profile=structuredCopy(profile);draftId=null;step=0;
+    const match=profile.name.match(/^(.*?) · r(\d+)$/);
+    profile.name=(match?match[1]:profile.name).slice(0,69)+' · r'+(match?Number(match[2])+1:2);
+    wizard();
+  }
   function tryOn(){
     layout('editor');tools.hidden=true;
     panel.replaceChildren();note();view.show(mesh,null,true);
@@ -3434,7 +3775,7 @@ function createHelmetLibrary(bridge, encode, decode){
       const hint=field('p','Or drop a helmet STL here · millimetres · up to 96 MiB');hint.id='dropHint';hint.className='hint';
     }
     panel.dataset.helmetDrop='true';
-    buttons(button('Saved helmets',()=>showHelmets(true)),button('Head details',()=>review(true)),button('Back to heads',()=>{queuedHelmet=null;home();}));
+    buttons(button('Saved helmets',()=>showHelmets(true)),button('Head details',()=>review(true)),...(profile.kind==='measured'?[button('Modify head',modifyHead)]:[button('Make measured copy',measuredCopy)]),button('Back to heads',()=>{queuedHelmet=null;home();}));
   }
   async function showHelmets(withHead=false){
     const gen=++libraryGeneration;
@@ -3454,7 +3795,7 @@ function createHelmetLibrary(bridge, encode, decode){
       });
     };
     try{
-      const items=await shelf.list();if(gen!==libraryGeneration||!grid.isConnected)return;
+      const [items,versions]=await Promise.all([shelf.list(),shelf.versions()]);if(gen!==libraryGeneration||!grid.isConnected)return;
       if(!items.length){
         const empty=document.createElement('p');empty.className='empty-shelf';
         empty.textContent='No saved helmets yet. Add an STL here, or save a helmet while fitting it.';grid.append(empty);return;
@@ -3467,7 +3808,19 @@ function createHelmetLibrary(bridge, encode, decode){
         const art=document.createElement('span'),img=document.createElement('img'),label=document.createElement('strong'),arrow=document.createElement('span');
         art.className='portrait-art';img.alt='';img.src=item.thumb;art.append(img);
         label.textContent=item.name.replace(/\.stl$/i,'');arrow.textContent='↗';arrow.className='tile-arrow';
-        arrow.setAttribute('aria-hidden','true');tile.append(art,label,arrow);grid.append(tile);
+        arrow.setAttribute('aria-hidden','true');tile.append(art,label,arrow);
+        const card=document.createElement('div');card.className='shell-card';card.append(tile);grid.append(card);
+        const saved=versions.filter(v=>v.shell===item.id&&(!withHead||v.head===selectedId));
+        if(saved.length){
+          const list=document.createElement('details'),summary=document.createElement('summary');summary.textContent=saved.length+' saved '+(saved.length===1?'fit':'fits');list.append(summary);
+          for(const v of saved){const who=heads.find(h=>h.id===v.head)?.name||'Saved head';
+            list.append(button(v.name+' · '+v.version+' / '+who,async()=>{
+              await shelfWork(async()=>{const wearer=await fetchHead(v.head);
+                selectedId=v.head;queuedHelmet=null;discardFit();openProfile(wearer);
+                const {bytes}=await shelf.get(item,v.head);startFit(bytes,item.name,item.id,v.pose,v);});
+            }));}
+          card.append(list);
+        }
       }
     }catch(e){if(grid.isConnected)note('Could not open your helmets. '+e.message);}
   }
@@ -3480,18 +3833,38 @@ function createHelmetLibrary(bridge, encode, decode){
   async function openStored(item){
     await shelfWork(async()=>{
       const {bytes,pose}=await shelf.get(item,selectedId);
+      const versions=(await shelf.versions()).filter(v=>v.shell===item.id&&v.head===selectedId);
+      const last=versions.filter(v=>!v.uid.startsWith('old:')).sort((a,b)=>(b.created||0)-(a.created||0))[0]||versions[0];
       if(!bytes)throw Error('The saved STL could not be read.');
-      startFit(bytes,item.name,item.id,pose);queuedHelmet=null;
-      if(pose)note('Restored the saved fit for '+profile.name+'.');
+      startFit(bytes,item.name,item.id,last?.pose||pose,last);queuedHelmet=null;
+      if(last||pose)note('Restored the saved fit for '+profile.name+'.');
     });
   }
-  async function saveFit(){
-    await shelfWork(async()=>{
-      note('Saving helmet and fit…');
-      const pose={offset:fit.offset.slice(),rotation:fit.rotation.slice(),scale:fit.scale.slice(),uniform,padding};
-      activeHelmetId=await shelf.save({id:activeHelmetId,name:helmetName,bytes:fit.bytes,
-        thumb:activeHelmetId?'':meshPortrait(fit.shell,G,fit.bytes,true),head:selectedId,pose});
-      fitPanel();note('Saved to Helmets with this head’s fit.');
+  function saveFit(){
+    if(!fit||shelfBusy||!Array.from(panel.querySelectorAll('input')).every(e=>e.reportValidity()))return;
+    dialog('Save fitted helmet',(d,close)=>{
+      const input=(text,val,max)=>{const l=document.createElement('label'),el=document.createElement('input');l.textContent=text;el.value=val;el.maxLength=max;l.append(el);d.append(l);return el;};
+      const name=input('Fit name',selectedVersion?.name||helmetName.replace(/\.stl$/i,''),80),v=input('Version','v1',30);
+      const caption=document.createElement('p');caption.textContent='For '+profile.name+'. Each version keeps its own alignment, scale and padding.';d.append(caption);
+      const message=document.createElement('p');message.setAttribute('role','status');d.append(message);
+      let all=[],loaded=false,manual=false;v.oninput=()=>manual=true;
+      function next(){if(manual)return;
+        const matching=all.filter(r=>r.shell===activeHelmetId&&r.head===selectedId&&r.name===name.value.trim());
+        let i=1;while(matching.some(r=>r.version==='v'+i))i++;v.value='v'+i;
+      }
+      const save=button('Save version',async()=>{
+        if(!loaded||!name.value.trim()||!v.value.trim()){message.textContent='Enter a fit name and a version.';return;}
+        save.disabled=cancel.disabled=true;d.oncancel=e=>e.preventDefault();
+        try{
+          const revision={uid:uid(),name:name.value.trim(),version:v.value.trim(),created:Date.now()},pose=poseNow();
+          if(all.some(r=>r.shell===activeHelmetId&&r.head===selectedId&&r.name===revision.name&&r.version===revision.version))throw Error('That version already exists. Choose a new version.');
+          activeHelmetId=await shelf.save({id:activeHelmetId,name:helmetName,bytes:fit.bytes,thumb:activeHelmetId?'':meshPortrait(fit.shell,G,fit.bytes,true),head:selectedId,pose,revision});
+          selectedVersion=revision;saveFingerprint=JSON.stringify(pose);close();fitPanel();note('Saved '+revision.name+' · '+revision.version+' to Helmets.');
+        }catch(e){message.textContent=e.name==='ConstraintError'?'That version already exists. Choose another version.':e.message;}
+        finally{save.disabled=cancel.disabled=false;d.oncancel=null;}
+      },true),cancel=button('Cancel',close);
+      save.disabled=true;d.append(cancel,save);name.oninput=next;
+      (async()=>{if(!activeHelmetId&&crypto.subtle){const key=await HeadArchive.digest(fit.bytes);if((await shelf.list()).some(s=>s.id===key))activeHelmetId=key;}return shelf.versions();})().then(items=>{all=items;loaded=true;save.disabled=false;next();}).catch(e=>message.textContent=e.message);
     });
   }
   async function loadHelmet(f){
@@ -3504,12 +3877,16 @@ function createHelmetLibrary(bridge, encode, decode){
       startFit(bytes,f.name,null,null);queuedHelmet=null;
     }catch(err){if(read===fileRead)note(err.message);}
   }
-  function startFit(bytes,name,id,pose){
+  function startFit(bytes,name,id,pose,revision=null){
     const next=fitter.start(mesh,bytes);
     if(pose)for(const key of ['rotation','scale','offset'])next[key]=pose[key].slice();
     fit=next;fitOwner=selectedId;activeHelmetId=id;helmetName=name;toolMode='orbit';opacity=.5;alignmentOpen=false;
     uniform=pose?.uniform??true;padding=pose?.padding??0;sliceOffsets=[0,0,0];resetUndo=null;
-    try{studio??=createFitStudio($('surface'),syncOffsets);studio.start(fit,mesh,raw);studio.opacity(opacity);surfaceFit=fit;studioOK=true;}
+    zoneIds=pose?.zones?.slice()??[0,1,2,3,4];fit.padAnchors=pose?.anchors||null;
+    selectedVersion=revision;highlightZone=null;proposal=null;padSurface=null;currentRows=[];
+    if(padding>0)fit.padAnchors??=Clearances.anchors(fit);
+    saveFingerprint=JSON.stringify(poseNow());
+    try{studio??=createFitStudio($('surface'),()=>{syncOffsets();const rows=padding?padInfo():[];syncPads(rows);studio.overlays(rows,highlightZone,mesh.eyes);if(proposal){proposal=null;$('applyScale')?.remove();}if(selectedVersion&&$('versionBadge'))$('versionBadge').textContent=selectedVersion.name+' · '+selectedVersion.version+(samePose()?'':' · modified');},inspectPad);studio.start(fit,mesh,raw);studio.opacity(opacity);surfaceFit=fit;studioOK=true;}
     catch(error){console.warn('3D view unavailable',error);studio?.stop();surfaceFit=null;studioOK=false;}
     sectionMode=studioOK?'3D':'Front section';fitPanel();
   }
@@ -3571,7 +3948,9 @@ function createHelmetLibrary(bridge, encode, decode){
   function redrawFit(){
     const is3D=sectionMode==='3D'&&surfaceFit===fit;
     $('view').hidden=is3D;$('surface').hidden=!is3D;$('fitTools').hidden=!is3D;
-    if(is3D){for(const b of $('fitTools').querySelectorAll('button'))b.setAttribute('aria-pressed',toolMode===b.dataset.tool);studio.apply();studio.tool(toolMode);studio.draw();}
+    const overlays=padding?padInfo():[];
+    syncPads( overlays );
+    if(is3D){studio.overlays(overlays,highlightZone,mesh.eyes);for(const b of $('fitTools').querySelectorAll('button'))b.setAttribute('aria-pressed',toolMode===b.dataset.tool);studio.apply();studio.tool(toolMode);studio.draw();}
     else{
       const {axis}=cuts[sectionMode], slider=$('slicePosition');
       const [min,max]=fitter.sliceRange(fit,axis);
@@ -3579,10 +3958,71 @@ function createHelmetLibrary(bridge, encode, decode){
       slider.min=min;slider.max=max;slider.value=offset;
       const distance=offset===0?'Center':(offset>0?'+':'')+offset+' mm';
       $('sliceDistance').textContent=distance;slider.setAttribute('aria-valuetext',distance);
-      view.fit({axis,...fitter.crossSection(fit,mesh,raw,axis,fit.center[axis]+offset)});
+      const plane=fit.center[axis]+offset,n=[0,0,0];n[axis]=1;
+      const cut=fitter.crossSection(fit,mesh,raw,axis,plane);
+      const foam=overlays.flatMap((row,i)=>row?fitter.sliceSurface(row.positions,n,plane).map(line=>({line,i})):[]);
+      view.fit({axis,...cut,foam,plane,short:overlays.flatMap((r,i)=>r?.short?[i]:[]),eyes:mesh.eyes,focus:highlightZone});
     }
     syncReset();
+    if(proposal&&proposal.signature!==JSON.stringify(poseNow())){proposal=null;$('applyScale')?.remove();}
+    const badge=$('versionBadge');if(badge&&selectedVersion)badge.textContent=selectedVersion.name+' · '+selectedVersion.version+(samePose()?'':' · modified');
+    if($('entryReadout'))$('entryReadout').textContent='';
     document.querySelector('.hud span').textContent=is3D?'Scroll to zoom · Shift-drag or middle-drag to pan':'Drag to move the helmet · Shift-drag to pan';
+  }
+  function padInfo(){padSurface??=Clearances.headSurface(mesh,raw,G);return Clearances.inspect(fit,padSurface,padding,zoneIds);}
+  function syncPads(rows){
+    currentRows=rows;const wrap=$('padZones');if(!wrap)return;wrap.hidden=padding===0;
+    const summary=$('padSummary');if(summary){
+      const placed=rows.filter(Boolean).length;
+      summary.textContent=!padding?'Preview uncompressed foam inside the shell.':placed+' of '+zoneIds.length+' pads located · '+padding+' mm thick'+(placed<zoneIds.length?' · inspect missing walls in a cut':'');
+    }
+    const legend=$('padLegend');if(legend)legend.hidden=padding===0;
+    for(const span of wrap.querySelectorAll('[data-gap]')){
+      const i=Number(span.dataset.gap),r=rows[i];
+      span.textContent=!zoneIds.includes(i)?'Off':!r?'No clear inner wall':r.gap==null?'Outside head outline':
+        (Math.abs(r.gap-padding)<.1?'Just touches':r.gap<padding?(padding-r.gap).toFixed(1)+' mm short':(r.gap-padding).toFixed(1)+' mm spare');
+      span.title=r?.gap==null?'':r.gap.toFixed(1)+' mm shell-to-head gap at pad center';
+    }
+  }
+  function buildPadding(){
+    const l=field('label','Preview padding (mm)'),pad=document.createElement('input');l.htmlFor=pad.id='padding';
+    pad.type='number';pad.min=0;pad.max=100;pad.step='any';pad.required=true;pad.value=padding;
+    pad.oninput=()=>{if(pad.value!==''&&pad.validity.valid){padding=pad.valueAsNumber;redrawFit();}};
+    const line=document.createElement('div');line.className='row pad';
+    line.append(pad,button('Suggest helmet scale',()=>{
+      if(!pad.reportValidity())return;
+      try{let scale;if(padding){padSurface??=Clearances.headSurface(mesh,raw,G);scale=Clearances.suggest(fit,padSurface,padding,zoneIds);}else scale=fitter.estimate(fit,0,uniform);
+        proposal={scale,signature:JSON.stringify(poseNow())};$('applyScale')?.remove();
+        const label=a=>a.map(n=>+(n*100).toFixed(1)).filter((n,i,arr)=>arr.length===1||!arr.every(x=>x===n)||i===0).join(' × ')+'%';
+        const b=button('Apply '+label(fit.scale)+' → '+label(scale),()=>{if(!proposal)return;fit.scale=proposal.scale;proposal=null;fitPanel();},true);b.id='applyScale';line.after(b);note('Preview only. Apply to change the shell.');
+      }catch(e){proposal=null;$('applyScale')?.remove();note(e.message);}
+    }));panel.append(line);
+    const blurb=field('p','');blurb.className='hint';blurb.id='padSummary';
+    const wrap=document.createElement('details');wrap.id='padZones';wrap.open=padDetails;
+    wrap.ontoggle=()=>{if(wrap.isConnected)padDetails=wrap.open;};
+    const sum=document.createElement('summary');sum.textContent='Foam locations and clearances';wrap.append(sum);
+    const hint=document.createElement('p');hint.className='hint';hint.textContent='Uncompressed foam. Select a location to inspect its center in a cut. Purple is foam; hatched pink marks a shortfall.';wrap.append(hint);
+    Clearances.zones.forEach((name,i)=>{const row=document.createElement('div');row.className='zone';
+      const check=document.createElement('input');check.type='checkbox';check.checked=zoneIds.includes(i);check.setAttribute('aria-label','Use '+name+' pad');
+      check.onchange=()=>{zoneIds=check.checked?[...zoneIds,i].sort():zoneIds.filter(n=>n!==i);redrawFit();};
+      const value=document.createElement('span');value.dataset.gap=i;
+      row.append(check,button(name,()=>inspectPad(i)),value);wrap.append(row);
+    });wrap.append(button('Re-seat pads on this alignment',()=>{fit.padAnchors=null;highlightZone=null;redrawFit();note('Checked pad locations against the current alignment.');}));panel.append(wrap);
+  }
+  let padDetails=false;
+  function inspectPad(i){
+    const row=currentRows[i];if(!row){note('No reliable pad at this location. Align the shell or check a neighboring cut.');return;}
+    highlightZone=i;const axis=i<2?1:0;sectionMode=axis===1?'Front section':'Side section';
+    sliceOffsets[axis]=Math.round(row.p[axis]-fit.center[axis]);padDetails=true;fitPanel();
+    note(Clearances.zones[i]+': '+(row.gap==null?'no head surface on this line':row.gap.toFixed(1)+' mm to inner wall · '+padding+' mm foam')+'.');
+  }
+  function entryControls(){
+    const load=()=>entryGauge(fitter.crossSection(fit,mesh,raw,2,fit.center[2]+sliceOffsets[2]+.00001).shellLines,THREE);
+    const wrap=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Check the entry opening';wrap.append(summary);
+    const p=document.createElement('p');p.textContent='Sweep to the narrowest continuous band. A 4 mm test ring copies this opening for a physical try-on.';p.className='hint';
+    const read=document.createElement('output');read.id='entryReadout';
+    wrap.append(p,button('Measure opening',()=>{try{const g=load();read.textContent=g.open?'Open band · '+[g.width&&g.width.toFixed(1)+' mm across',g.depth&&g.depth.toFixed(1)+' mm front to back'].filter(Boolean).join(' × ')+' at the center. The test piece keeps the opening.':'Inside: '+g.width.toFixed(1)+' mm wide × '+g.depth.toFixed(1)+' mm deep.';}catch(e){read.textContent=e.message;}}),
+      button(native?'Open test ring in OrcaSlicer':'Download test ring STL',()=>{try{sendSTL(G.binarySTL(load()),exportStem()+'-entry-ring-fitted.stl');}catch(e){read.textContent=e.message;}}),read);panel.append(wrap);
   }
   function fitPanel(){
     layout('fit');panel.replaceChildren();note();
@@ -3592,6 +4032,7 @@ function createHelmetLibrary(bridge, encode, decode){
     const titleText=document.createElement('h2');titleText.textContent='Fit helmet';
     const reset=button('Reset helmet',resetHelmet);reset.id='helmetReset';
     heading.append(titleText,reset);panel.append(heading);
+    if(selectedVersion){const badge=field('p','');badge.id='versionBadge';badge.className='step';}
     function group(parent,labels,current,change){
       const wrap=document.createElement('div');wrap.className='segmented';
       for(const [label,value] of labels){const b=button(label,()=>{
@@ -3613,7 +4054,7 @@ function createHelmetLibrary(bridge, encode, decode){
     if(cuts[sectionMode]){
       sliceControl(cuts[sectionMode]);
       const legend=document.createElement('div');legend.className='cut-legend';
-      for(const name of ['Head','Helmet']){const key=document.createElement('span');key.textContent=name;legend.append(key);}
+      for(const name of ['Head','Helmet']){const key=document.createElement('span');key.textContent=name;legend.append(key);}{const k=document.createElement('span');k.id='padLegend';k.textContent='Foam';k.className='foam-key';legend.append(k);}if(mesh.eyes){const k=document.createElement('span');k.textContent='Eye line';k.className='eye-key';legend.append(k);}
       panel.append(legend);
     }
     if(studioOK&&sectionMode==='3D'){
@@ -3621,22 +4062,22 @@ function createHelmetLibrary(bridge, encode, decode){
       l.htmlFor=el.id='opacity';l.className='range-label';out.textContent=Math.round(opacity*100)+'%';l.append(out);
       el.type='range';el.min=0;el.max=100;el.value=Math.round(opacity*100);el.oninput=()=>{opacity=Number(el.value)/100;out.textContent=el.value+'%';studio.opacity(opacity);};panel.append(el);
     }
+    if(mesh.eyes&&sectionMode==='3D'){
+      const missing=profile.values.eyeDrop==null?' · height estimated':profile.values.pupilGap==null?' · spacing estimated':'';
+      field('p','Cyan markers: pupil positions'+missing).className='hint';
+    }
     field('h3','Helmet scale');
     group(panel,[['Uniform',true],['Per axis',false]],uniform,v=>{uniform=v;if(v)fit.scale.fill(Math.max(...fit.scale));fitPanel();});
     numbers(panel,uniform?['Size (%)']:['Width (%)','Depth (%)','Height (%)'],fit.scale.map(x=>100*x),5,1000,(i,x)=>{if(uniform)fit.scale.fill(x/100);else fit.scale[i]=x/100;});
-    const l=field('label','Padding per side (mm)'),pad=document.createElement('input');l.htmlFor=pad.id='padding';
-    pad.type='number';pad.min=0;pad.max=100;pad.step='any';pad.required=true;pad.value=padding;pad.oninput=()=>{if(pad.value!==''&&pad.validity.valid)padding=pad.valueAsNumber;};
-    const line=document.createElement('div');line.className='row pad';line.append(pad,button('Estimate helmet scale',()=>{
-      if(!pad.reportValidity()||!Number.isFinite(pad.valueAsNumber)){note('Enter a padding thickness in millimetres.');return;}
-      try{fit.scale=fitter.estimate(fit,padding,uniform);fitPanel();note('Estimated from the inner walls and crown. Check the visor, jaw and entry opening.');}catch(err){note(err.message);}
-    }));panel.append(line);
+    buildPadding();
+    if(sectionMode==='Top section')entryControls();
     const alignment=document.createElement('details'),title=document.createElement('summary');title.textContent='Precise alignment';alignment.append(title);
     const rot=document.createElement('div');rot.className='actions';
     ['Pitch','Roll','Turn'].forEach((name,i)=>rot.append(button(name+' 90°',()=>{fitter.turn(fit,i);redrawFit();})));
     alignment.open=alignmentOpen;alignment.ontoggle=()=>{if(alignment.isConnected)alignmentOpen=alignment.open;};
     alignment.append(rot);numbers(alignment,['Right (mm)','Back (mm)','Up (mm)'],fit.offset,-1000,1000,(i,x)=>fit.offset[i]=x,true);panel.append(alignment);
-    footer.replaceChildren(button(native?'Open fitted helmet in OrcaSlicer':'Download fitted helmet STL',acceptHelmet,true));
-    buttons(button(activeHelmetId?'Save fit':'Save to Helmets',saveFit),button('Change helmet',()=>$('helmetFile').click()),button('Back to head',tryOn));redrawFit();
+    footer.replaceChildren(button('Save fit…',saveFit),button(native?'Open fitted helmet in OrcaSlicer':'Download fitted helmet STL',acceptHelmet,true));
+    buttons(button('Change helmet',()=>$('helmetFile').click()),button('Back to head',tryOn));redrawFit();
   }
   for(const b of $('fitTools').querySelectorAll('button'))b.onclick=()=>{toolMode=b.dataset.tool;studio.tool(toolMode);for(const other of $('fitTools').querySelectorAll('button'))other.setAttribute('aria-pressed',other===b);};
   function lockTransfer(locked){
@@ -3647,11 +4088,17 @@ function createHelmetLibrary(bridge, encode, decode){
     footer.querySelectorAll('button').forEach(b=>b.disabled=locked);
     footer.setAttribute('aria-busy',String(locked));
   }
+  function exportStem(){
+    const stem=selectedVersion?selectedVersion.name+'-'+selectedVersion.version+(samePose()?'':'-draft'):helmetName.replace(/\.stl$/i,'');
+    return stem.replace(/[^\p{L}\p{N}._ -]/gu,'_').slice(0,90)||'Helmet';
+  }
   function acceptHelmet(){
     if(transfer||!Array.from(panel.querySelectorAll('input')).every(el=>el.reportValidity()))return;
     try{
-      const bytes=fitter.fittedSTL(fit);
-      const name=helmetName.replace(/\.stl$/i,'')+'-fitted.stl';
+      sendSTL(fitter.fittedSTL(fit),exportStem()+'-fitted.stl');
+    }catch(err){failed(err);}
+  }
+  function sendSTL(bytes,name){try{
       if(!native){
         const a=document.createElement('a');const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
         a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);return;

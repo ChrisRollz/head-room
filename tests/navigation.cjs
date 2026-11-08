@@ -68,12 +68,12 @@ async function walkthrough(page) {
   await heading('Try on a helmet');
   await click('Head details');await heading('Workshop');
   const exported=await download('Export head STL');assert(exported.data.length>84);
-  await click('Edit measurements as new head');await input.fill('600');await click('Back');await heading('Workshop');
+  await click('Modify head');await input.fill('600');await click('Back');await heading('Workshop');
   assert.match(await page.locator('dl.values').innerText(),/540 mm/);
-  await click('Edit measurements as new head');await input.fill('550');
+  await click('Modify head');await input.fill('550');
   for(let i=0;i<3;i++) await click('Next');
-  await click('Review my head');await click('Add to saved heads');await click('Back to heads');
-  await button('Try a helmet on Workshop (2)').waitFor();await button('Try a helmet on Workshop').press('Enter');
+  await click('Review my head');await click('Save head revision');await click('Back to heads');
+  await button('Try a helmet on Workshop · r2').waitFor();await button('Try a helmet on Workshop').press('Enter');
   await heading('Try on a helmet');await choose('Choose helmet STL', []);await heading('Try on a helmet');
   await drop([shell, shell]);await status.filter({hasText:/one assembled/}).waitFor();
   await drop([shell]);await heading('Fit helmet');
@@ -85,7 +85,7 @@ async function walkthrough(page) {
   for (const axis of ['Pitch','Roll','Turn']) await click(axis+' 90°');
   for (const mode of ['Front cut','Side cut','3D']) await click(mode);
   await click('Reset view');await click('Move');await click('Rotate');await click('Orbit');
-  await page.getByLabel('Padding per side (mm)').fill('3');await click('Estimate helmet scale');
+  await page.getByLabel('Preview padding (mm)').fill('3');await click('Suggest helmet scale');
   assert.match(await status.innerText(),/opening|wall|adjust|rays|scale|align|Estimate/i);
   await size.fill('94');await choose('Change helmet',broken);await status.filter({hasText:/STL/}).waitFor();
   assert.equal(await size.inputValue(),'94');
@@ -106,13 +106,13 @@ async function walkthrough(page) {
   const fitted=await download('Download fitted helmet STL');assert.equal(fitted.name,'Helmet-fitted.stl');
   assert.equal(fitted.data.readUInt32LE(80),mannequin.readUInt32LE(80));assert.notDeepEqual(fitted.data,mannequin);
   await choose('Change helmet',shell);await page.waitForFunction(()=>document.querySelector('.fit-fields input')?.value==='100');
-  await click('Back to head');await click('Back to heads');await click('Try a helmet on Workshop (2)');
+  await click('Back to head');await click('Back to heads');await click('Try a helmet on Workshop · r2');
   await heading('Try on a helmet');assert.equal(await button('Resume fitting').count(),0);
   await click('Head details');await click('Try on a helmet');await heading('Try on a helmet');
   await click('Back to heads');await choose('Use my own STL',head);await heading('Review your head');await click('Back');
   await choose('Use my own STL',head);await heading('Review your head');await click('Add to saved heads');await heading('Try on a helmet');
   await click('Head details');const copy=await download('Export head STL');assert.deepEqual(copy.data,mannequin);
-  assert.equal(await button('Edit measurements as new head').count(),0);
+  assert.equal(await button('Modify head').count(),0);
   await click('Back to heads');await page.reload();await click('Try a helmet on Reference');await heading('Try on a helmet');
   await choose('Choose helmet STL',shell);await heading('Fit helmet');
 }
@@ -140,7 +140,7 @@ async function helmetShelf(page){
   const before=await download('Download fitted helmet STL');
   await click('Reset helmet');assert.deepEqual(await vals(),[0,0,0]);assert.equal(await page.getByLabel('Size (%)').inputValue(),'100');
   await click('Undo reset');assert.deepEqual((await download('Download fitted helmet STL')).data,before.data);
-  await click('Save fit');await page.getByText(/Saved to Helmets with this head/).waitFor();
+  await click('Save fit…');await click('Save version');await page.getByText(/Saved Helmet · v1 to Helmets/).waitFor();
   await page.reload();await click('Helmets');await button('Try on Helmet.stl').waitFor();assert.equal(await button('Try on Helmet.stl').count(),1);await click('Try on Helmet.stl');
   await click('Try a helmet on Reference');await heading('Fit helmet');assert.equal(await page.locator('#padding').inputValue(),'6');
   assert.deepEqual((await download('Download fitted helmet STL')).data,before.data);
@@ -148,10 +148,51 @@ async function helmetShelf(page){
   await click('Add to saved heads');await click('Saved helmets');await click('Try on Helmet.stl');await heading('Fit helmet');
   assert.equal(await page.getByLabel('Size (%)').inputValue(),'100');assert.deepEqual(await vals(),[0,0,0]);assert.equal(await page.locator('#padding').inputValue(),'0');
   await choose('Change helmet',asFile('Another.stl',Buffer.from(geometry.binarySTL(geometry.generate({height:248})))));
-  await click('Save to Helmets');await page.getByText(/Saved to Helmets with this head/).waitFor();
+  await click('Save fit…');await click('Save version');await page.getByText(/Saved Another · v1 to Helmets/).waitFor();
   await click('Back to head');await click('Saved helmets');await button('Try on Another.stl').waitFor();await button('Try on Helmet.stl').waitFor();
 }
 
+async function versionsAndBackup(page){
+  const {click,choose,heading,button,download}=controls(page);
+  const fixture=require('./refinements.cjs').buf;
+  await page.goto(pageURL);await click('Make my head');
+  for(const m of ['560','154','194','228']){await page.getByLabel('Your measurement').fill(m);await page.getByLabel('Your measurement').press('Enter');}
+  await click('Refine visor and ear fit');
+  for(const m of ['95','62','210','14','9']){await page.getByLabel('Your measurement').fill(m);await page.getByLabel('Your measurement').press('Enter');}
+  await page.getByLabel('Head name').fill('Demo');await click('Add to saved heads');
+  await click('Modify head');assert.equal(await page.getByLabel('Your measurement').inputValue(),'560');
+  for(let i=0;i<3;i++)await click('Next');await click('Review my head');await click('Refine visor and ear fit');
+  assert.equal(await page.getByLabel('Your measurement').inputValue(),'95');await page.getByLabel('Your measurement').fill('92');await click('Done with details');await click('Save head revision');
+  await choose('Choose helmet STL',asFile('Ring helmet.stl',Buffer.from(fixture)));await heading('Fit helmet');
+  await page.getByLabel('Preview padding (mm)').fill('6');await page.getByText('Foam locations and clearances',{exact:true}).click();
+  await page.getByLabel('Use Forehead pad').uncheck();await click('Left temple');await page.locator('#status').filter({hasText:/inner wall/}).waitFor();
+  await click('Top cut');await page.getByText('Check the entry opening',{exact:true}).click();await click('Measure opening');
+  assert.match(await page.locator('#entryReadout').innerText(),/102.0 mm wide/);
+  assert((await download('Download test ring STL')).name.includes('entry-ring'));
+  await page.getByLabel('Size (%)').fill('150');
+  await click('Suggest helmet scale');await page.getByRole('button',{name:/^Apply /}).waitFor();assert.equal(await page.getByLabel('Size (%)').inputValue(),'150');
+  await page.getByRole('button',{name:/^Apply /}).click();
+  await click('Save fit…');await page.getByLabel('Fit name').fill('Con fit');await click('Save version');await page.getByText(/Saved Con fit · v1/).waitFor();
+  const original=await download('Download fitted helmet STL');assert.equal(original.name,'Con fit-v1-fitted.stl');
+  await page.getByLabel('Size (%)').fill('133');await click('Save fit…');await page.getByLabel('Version',{exact:true}).waitFor();await page.waitForFunction(()=>Array.from(document.querySelectorAll('dialog input')).some(e=>e.value==='v2'));
+  await click('Save version');await page.getByText(/Saved Con fit · v2/).waitFor();
+  await click('Back to head');await click('Back to heads');await click('Library backup');
+  const backup=await download('Back up library');assert(backup.name.endsWith('.headroom'));await click('Done');
+  const fresh=await page.context().browser().newPage();try{
+    const c=controls(fresh);await fresh.goto(pageURL);
+    for(let i=0;i<2;i++){await c.click('Library backup');await c.choose('Restore backup…',asFile('Workshop.headroom',backup.data));
+      await fresh.getByText('Library restored. Existing items were kept.').waitFor();await c.click('Done');}
+    assert.equal(await fresh.locator('.head-tile').count(),2);
+    await c.click('Helmets');await fresh.getByText('2 saved fits',{exact:true}).click();
+    await c.click('Con fit · v1 / Demo · r2');
+    assert.deepEqual((await c.download('Download fitted helmet STL')).data,original.data);
+    assert.equal(await fresh.getByLabel('Preview padding (mm)').inputValue(),'6');
+    await c.click('Back to head');await c.click('Head details');
+    assert.match(await fresh.locator('.values').innerText(),/92 mm/);
+    await c.click('Back to heads');await c.click('Try a helmet on Demo');await c.click('Head details');
+    assert.match(await fresh.locator('.values').innerText(),/95 mm/);
+  }finally{await fresh.context().close();}
+}
 async function fallback(page) {
   const {click,heading,choose,button}=controls(page);
   await page.addInitScript(()=>{
@@ -191,7 +232,7 @@ async function legacyLibrary(page) {
 (async()=>{
   const browser=await chromium.launch({executablePath:process.env.CHROME_BIN||(process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':undefined),headless:true,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
   try {
-    for(const test of [walkthrough,helmetShelf,fallback,legacyLibrary]) {
+    for(const test of [walkthrough,helmetShelf,versionsAndBackup,fallback,legacyLibrary]) {
       const page=await browser.newPage({viewport:{width:1200,height:770}}),errors=[];
       page.setDefaultTimeout(7000);page.on('pageerror',error=>errors.push(error.message));
       await test(page);assert.deepEqual(errors,[]);await page.context().close();console.log('Passed '+test.name);
