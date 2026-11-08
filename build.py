@@ -6,7 +6,7 @@ source = root / "src"
 dist = root / "dist"
 dist.mkdir(exist_ok=True)
 page = (source / "page.html").read_text()
-for key, file in [("GEOMETRY", "geometry.js"), ("FIT", "fit.js"), ("VIEW", "view.js"), ("STUDIO", "studio.js"), ("APP", "app.js")]:
+for key, file in [("GEOMETRY", "geometry.js"), ("FIT", "fit.js"), ("VIEW", "view.js"), ("STUDIO", "studio.js"), ("LIBRARY", "helmet-library.js"), ("APP", "app.js")]:
     page = page.replace(f"/*{key}*/", (source / file).read_text())
 vendor = source / "vendor"
 third_party = (vendor / "LICENSE").read_text()

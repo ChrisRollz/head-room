@@ -117,6 +117,41 @@ async function walkthrough(page) {
   await choose('Choose helmet STL',shell);await heading('Fit helmet');
 }
 
+async function helmetShelf(page){
+  const {click,heading,button,choose,download}=controls(page);
+  await page.goto(pageURL);await click('Helmets');await heading('Helmets');
+  await choose('Add helmet STL',broken);await page.locator('#status').filter({hasText:/STL/}).waitFor();
+  await choose('Add helmet STL',shell);await click('Try on Helmet.stl');
+  await choose('Use my own STL',head);await heading('Review your head');await click('Add to saved heads');await heading('Fit helmet');
+  const vals=()=>page.locator('[data-offset]').evaluateAll(es=>es.map(e=>Number(e.value)));
+  const cut=page.locator('#view');
+  for(const [mode,axis,right,up,sign] of [['Front cut',1,0,2,1],['Side cut',0,1,2,-1],['Top cut',2,0,1,1]]){
+    await click(mode);await cut.press('ArrowRight');await cut.press('ArrowUp');
+    const initial=await vals();const box=await cut.boundingBox(),x=box.x+box.width*.45,y=box.y+box.height*.43;
+    await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+18,y-11,{steps:3});await page.mouse.up();
+    const moved=await vals();assert.equal(moved[axis],initial[axis]);assert((moved[right]-initial[right])*sign>1);assert(moved[up]>initial[up]);
+    await page.mouse.down({button:'middle'});await page.mouse.move(x+42,y+24);await page.mouse.up({button:'middle'});await page.mouse.wheel(0,100);
+    assert.deepEqual(await vals(),moved);
+    await page.locator('#slicePosition').fill('9');assert.equal(await page.locator('#sliceDistance').innerText(),'+9 mm');
+  }
+  await click('Front cut');assert.equal(await page.locator('#slicePosition').inputValue(),'9');
+  await click('Per axis');await page.getByLabel('Depth (%)').fill('81');await page.locator('#padding').fill('6');
+  await page.getByText('Precise alignment',{exact:true}).click();await click('Pitch 90°');
+  const before=await download('Download fitted helmet STL');
+  await click('Reset helmet');assert.deepEqual(await vals(),[0,0,0]);assert.equal(await page.getByLabel('Size (%)').inputValue(),'100');
+  await click('Undo reset');assert.deepEqual((await download('Download fitted helmet STL')).data,before.data);
+  await click('Save fit');await page.getByText(/Saved to Helmets with this head/).waitFor();
+  await page.reload();await click('Helmets');await button('Try on Helmet.stl').waitFor();assert.equal(await button('Try on Helmet.stl').count(),1);await click('Try on Helmet.stl');
+  await click('Try a helmet on Reference');await heading('Fit helmet');assert.equal(await page.locator('#padding').inputValue(),'6');
+  assert.deepEqual((await download('Download fitted helmet STL')).data,before.data);
+  await click('Back to head');await click('Back to heads');await choose('Use my own STL',asFile('Second.stl',mannequin));await heading('Review your head');
+  await click('Add to saved heads');await click('Saved helmets');await click('Try on Helmet.stl');await heading('Fit helmet');
+  assert.equal(await page.getByLabel('Size (%)').inputValue(),'100');assert.deepEqual(await vals(),[0,0,0]);assert.equal(await page.locator('#padding').inputValue(),'0');
+  await choose('Change helmet',asFile('Another.stl',Buffer.from(geometry.binarySTL(geometry.generate({height:248})))));
+  await click('Save to Helmets');await page.getByText(/Saved to Helmets with this head/).waitFor();
+  await click('Back to head');await click('Saved helmets');await button('Try on Another.stl').waitFor();await button('Try on Helmet.stl').waitFor();
+}
+
 async function fallback(page) {
   const {click,heading,choose,button}=controls(page);
   await page.addInitScript(()=>{
@@ -156,7 +191,7 @@ async function legacyLibrary(page) {
 (async()=>{
   const browser=await chromium.launch({executablePath:process.env.CHROME_BIN||(process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':undefined),headless:true,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
   try {
-    for(const test of [walkthrough,fallback,legacyLibrary]) {
+    for(const test of [walkthrough,helmetShelf,fallback,legacyLibrary]) {
       const page=await browser.newPage({viewport:{width:1200,height:770}}),errors=[];
       page.setDefaultTimeout(7000);page.on('pageerror',error=>errors.push(error.message));
       await test(page);assert.deepEqual(errors,[]);await page.context().close();console.log('Passed '+test.name);

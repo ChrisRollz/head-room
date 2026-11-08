@@ -1,6 +1,13 @@
-function createHeadView(canvas) {
+function createHeadView(canvas, moveHelmet) {
   const ctx=canvas.getContext('2d');
-  let mesh, guide, shell=null, section=null, yaw=-.38, pitch=.12, center=[0,0,114], extent=275, headExtent=275, last=null,zoom=1,pan=[0,0],panning=false;
+  let mesh, guide, section=null, yaw=-.38, pitch=.12, center=[0,0,114], extent=275, headExtent=275, last=null,zoom=1,pan=[0,0],panning=false;
+  // Horizontal and upward screen directions in model coordinates, for X/Y/Z-normal cuts.
+  const planes=[{right:1,sign:-1,up:2},{right:0,sign:1,up:2},{right:0,sign:1,up:1}];
+  function pixelsPerMM(){return Math.min(canvas.clientWidth*.82,canvas.clientHeight*.84)*zoom/extent;}
+  function moveInPlane(dx,dy){
+    const {right,sign,up}=planes[section.axis],delta=[0,0,0];
+    delta[right]=sign*dx;delta[up]=dy;moveHelmet(delta);
+  }
   const poses={circumference:[-.45,.32],width:[0,.02],length:[1.45,.10],height:[1.33,.04]};
   function reset(){zoom=1;pan=[0,0];[yaw,pitch]=section ? [section.axis===0?Math.PI/2:0,0] : poses[guide]||[-.38,.12];draw();}
   function draw(){
@@ -8,7 +15,21 @@ function createHeadView(canvas) {
     const w=canvas.clientWidth,h=canvas.clientHeight, dpr=Math.min(devicePixelRatio||1,2);
     if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
-    const scale=Math.min(w*.82,h*.84)*zoom/extent, cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+    if(!w||!h)return;
+    const scale=pixelsPerMM(), cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+    if(section){
+      const {right,sign,up}=planes[section.axis];
+      function outline(segments,color){
+        ctx.beginPath();
+        for(const [a,b] of segments){
+          ctx.moveTo(w/2+pan[0]+sign*(a[right]-center[right])*scale,h*.49+pan[1]-(a[up]-center[up])*scale);
+          ctx.lineTo(w/2+pan[0]+sign*(b[right]-center[right])*scale,h*.49+pan[1]-(b[up]-center[up])*scale);
+        }
+        ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
+      }
+      outline(section.headLines,'#9de6ce');outline(section.shellLines,'#ffd084');
+      return;
+    }
     function project(p){
       const x=p[0]-center[0],y=p[1]-center[1],z=p[2]-center[2],depth=y*cy+x*sy;
       return [w/2+pan[0]+(x*cy-y*sy)*scale,h*.49+pan[1]-(z*cp+depth*sp)*scale,depth*cp-z*sp];
@@ -20,11 +41,6 @@ function createHeadView(canvas) {
     for(let i=-5;i<=5;i++) for(let axis=0;axis<2;axis++){
       const p=axis?[i*unit,-5*unit,ground]:[-5*unit,i*unit,ground],q=axis?[i*unit,5*unit,ground]:[5*unit,i*unit,ground];
       line([p,q].map(a=>project([a[0]+center[0],a[1]+center[1],ground])),'#384950',1);
-    }
-    if(section){
-      for(const segment of section.headLines) line(segment.map(project),'#9de6ce',2);
-      for(const segment of section.shellLines) line(segment.map(project),'#ffd084',2);
-      return;
     }
     const points=mesh.vertices.map(project);
     const faces=mesh.faces.map(f=>{const [a,b,c]=f.map(i=>points[i]);return {a,b,c,z:a[2]+b[2]+c[2]};});
@@ -53,18 +69,34 @@ function createHeadView(canvas) {
     }else line(overlay.map(project),'#ffe099',3);
     if(overlay.length===2)for(const p of overlay){const [x,y]=project(p);ctx.beginPath();ctx.arc(x,y,4,0,2*Math.PI);ctx.fillStyle='#ffe099';ctx.fill();}
   }
-  canvas.addEventListener('pointerdown',e=>{panning=e.shiftKey||e.button===1||e.button===2;if(section&&!panning)return;e.preventDefault();last=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);});
-  canvas.addEventListener('pointermove',e=>{if(!last)return;const dx=e.clientX-last[0],dy=e.clientY-last[1];
-    if(panning){pan[0]+=dx;pan[1]+=dy;}else{yaw+=dx*.012;pitch=Math.max(-1.2,Math.min(1.2,pitch+dy*.008));}
-    last=[e.clientX,e.clientY];draw();});
+  canvas.addEventListener('pointerdown',e=>{
+    if(last||!e.isPrimary||e.button>2)return;
+    panning=e.shiftKey||e.button===1||e.button===2;
+    e.preventDefault();if(section)canvas.focus({preventScroll:true});
+    last=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove',e=>{
+    if(!last||!canvas.hasPointerCapture(e.pointerId))return;
+    const dx=e.clientX-last[0],dy=e.clientY-last[1];last=[e.clientX,e.clientY];
+    if(panning){pan[0]+=dx;pan[1]+=dy;}
+    else if(section){const k=pixelsPerMM();if(k)moveInPlane(dx/k,-dy/k);return;}
+    else{yaw+=dx*.012;pitch=Math.max(-1.2,Math.min(1.2,pitch+dy*.008));}
+    draw();
+  });
+  canvas.addEventListener('keydown',e=>{
+    const arrows={ArrowRight:[1,0],ArrowLeft:[-1,0],ArrowUp:[0,1],ArrowDown:[0,-1]};
+    if(section&&arrows[e.key]){e.preventDefault();moveInPlane(...arrows[e.key]);}
+  });
   canvas.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.06,Math.min(30,zoom*Math.exp(-Math.sign(e.deltaY)*.12)));draw();},{passive:false});
   canvas.addEventListener('contextmenu',e=>e.preventDefault());
   canvas.addEventListener('lostpointercapture',()=>{last=null;});
   new ResizeObserver(draw).observe(canvas);
-  return {reset,fit(overlay,cut){const previous=section?.axis;shell=overlay;section=cut;
+  return {reset,fit(cut){const previous=section?.axis;section=cut;canvas.tabIndex=0;
+    canvas.setAttribute('aria-label','Helmet cut view. Drag to move the helmet or use the arrow keys to nudge by one millimetre.');
     extent=headExtent*1.4;
     if(previous!==section?.axis)reset();else draw();
-  },show(m,g,turn=false){mesh=m;guide=g;shell=null;section=null;
+  },show(m,g,turn=false){mesh=m;guide=g;section=null;canvas.removeAttribute('tabindex');
+    canvas.setAttribute('aria-label','Head preview with measurement guides');
     if(m.mins){center=m.mins.map((v,i)=>(v+m.maxs[i])/2);extent=Math.max(...m.maxs.map((v,i)=>v-m.mins[i]))*1.12;}
     else{center=[0,0,m.actual.height/2];extent=Math.max(m.actual.height*1.08,m.actual.length*1.12,m.actual.width*1.12);}
     headExtent=extent;document.querySelector('.hud span').textContent='Drag to rotate';

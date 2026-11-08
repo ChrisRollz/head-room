@@ -63,9 +63,12 @@ function createFitStudio(canvas,onPose){
 
 // Render each library portrait from the wearer's mesh, even when WebGL is unavailable.
 function headPortrait(profile,G,decode){
+  const raw=profile.kind==='stl'?decode(profile.data):null;
+  return meshPortrait(raw?G.inspectSTL(raw):G.generate(profile.values),G,raw);
+}
+function meshPortrait(mesh,G,raw=null,helmet=false){
   const W=240,H=200,c=document.createElement('canvas');c.width=W;c.height=H;
   const ctx=c.getContext('2d'),img=ctx.createImageData(W,H),depth=new Float32Array(W*H).fill(Infinity);
-  const raw=profile.kind==='stl'?decode(profile.data):null,mesh=raw?G.inspectSTL(raw):G.generate(profile.values);
   const [lo,hi]=createHelmetFitting(G).bounds(mesh),ctr=lo.map((v,i)=>(v+hi[i])/2);
   const k=H*.83/Math.max(...hi.map((v,i)=>v-lo[i])),yaw=-.48,cy=Math.cos(yaw),sy=Math.sin(yaw);
   function proj(p){const x=p[0]-ctr[0],y=p[1]-ctr[1],z=p[2]-ctr[2],d=x*sy+y*cy;
@@ -74,7 +77,7 @@ function headPortrait(profile,G,decode){
     const [a,b,c]=points.map(proj),ux=b[0]-a[0],uy=b[1]-a[1],uz=(b[2]-a[2])*k,vx=c[0]-a[0],vy=c[1]-a[1],vz=(c[2]-a[2])*k;
     const nz=ux*vy-uy*vx;if(Math.abs(nz)<.00001)return;
     const nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,light=Math.max(0,(nx*.35+ny*.55+nz*.66)*Math.sign(nz)/(Math.hypot(nx,ny,nz)||1));
-    const rgb=[99+123*light,135+99*light,132+92*light];
+    const rgb=helmet?[146+101*light,119+99*light,79+89*light]:[99+123*light,135+99*light,132+92*light];
     for(let y=Math.max(0,Math.floor(Math.min(a[1],b[1],c[1])));y<=Math.min(H-1,Math.ceil(Math.max(a[1],b[1],c[1])));y++){
       for(let x=Math.max(0,Math.floor(Math.min(a[0],b[0],c[0])));x<=Math.min(W-1,Math.ceil(Math.max(a[0],b[0],c[0])));x++){
         const dx=x+.5-a[0],dy=y+.5-a[1],s=(dx*vy-dy*vx)/nz,t=(ux*dy-uy*dx)/nz;if(s<0||t<0||s+t>1)continue;

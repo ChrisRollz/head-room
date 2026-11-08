@@ -58,6 +58,16 @@ html:root body{margin:0;padding:0;background:#151b1f}
 #head-room.fit-mode .panel::before,#head-room.fit-mode .panel::after{display:none}
 #head-room.fit-mode h2{margin:0 0 18px}#head-room.fit-mode h3{margin:22px 0 8px;font-size:17px}
 #head-room.fit-mode .step{overflow-wrap:anywhere;margin:0 0 5px;color:#9fbab3}
+.fit-heading,.slice-ends,.cut-legend{display:flex;align-items:center}
+#head-room .fit-heading{justify-content:space-between;gap:8px;margin:0 0 14px}
+#head-room .fit-heading h2{margin:0}
+#helmetReset{font-size:13px;padding:5px 9px}
+.slice-ends{justify-content:space-between;color:#adc2bc;font-size:12px}
+.cut-legend{gap:15px;margin:14px 0 0;color:#d6e2df;font-size:13px}
+.cut-legend span::before{content:"";display:inline-block;vertical-align:middle;width:18px;height:2px;margin-right:6px;background:#9de6ce}
+.cut-legend span+span::before{background:#ffd084}
+#head-room .segmented:has(> :nth-child(4)) button{padding:6px 3px;white-space:nowrap;font-size:13px}
+canvas:focus-visible{outline:2px solid #e8bf78;outline-offset:-3px}canvas:active{cursor:grabbing}
 .segmented,.view-tools{display:flex;gap:2px;padding:3px;border:1px solid #415252;border-radius:10px;background:#162023}
 #head-room .segmented button,#head-room .view-tools button{border:0;background:transparent;color:#bfceca;font-size:14px;font-weight:550;padding:6px 10px;border-radius:6px}
 #head-room .segmented button{flex:1}#head-room button[aria-pressed=true]{background:#354a48;color:#d7fff0}
@@ -80,6 +90,8 @@ html:root body{margin:0;padding:0;background:#151b1f}
   #head-room.fit-mode .status{margin:8px 0 0}
 }
 @media(max-width:720px){#head-room.fit-mode section{grid-template-columns:1fr;grid-template-rows:minmax(265px,46vh) auto}.library-mode #content{display:block}.library-mode #content>.actions{margin-top:16px}.portraits{grid-template-columns:repeat(auto-fit,minmax(min(100%,142px),1fr));gap:10px;margin-top:18px}.portrait-art{height:138px}}
+.empty-shelf{grid-column:1/-1;padding:22px;border:1px dashed #53655e;border-radius:12px}
+.helmet-tile .portrait-art{background:radial-gradient(ellipse at 52% 38%,#514d3c,#2a302f 77%)}
 </style></head><body><main id="head-room"><header><span class="mark" aria-hidden="true"></span><h1>Head Room</h1></header>
 <section><div class="scene"><canvas id="view" aria-label="Head preview with measurement guides"></canvas><canvas id="surface" hidden aria-label="Helmet fitting viewport"></canvas><div id="fitTools" class="view-tools" role="group" aria-label="Helmet positioning" hidden><button type="button" data-tool="orbit" aria-pressed="true">Orbit</button><button type="button" data-tool="translate">Move</button><button type="button" data-tool="rotate">Rotate</button></div><div class="hud"><button type="button" id="resetView">Reset view</button><span>Drag to rotate</span></div></div>
 <div class="panel"><div id="content"></div><p id="status" class="status" role="status"></p><div id="fitFooter" hidden></div></div></section>
@@ -87,4 +99,4 @@ html:root body{margin:0;padding:0;background:#151b1f}
 <div><dt>Flexible measuring tape</dt><dd>Wrap it around your brow. A strip of paper or non-stretch string marked and measured flat works too.</dd></div>
 <div><dt>Rigid tape or ruler</dt><dd>Measure straight distances between two parallel books, or read the gap between caliper tips.</dd></div>
 <div><dt>Cosplay calipers <small>(optional)</small></dt><dd>Lightly touch the two landmarks and lift the calipers away. <a id="caliperLink" href="https://www.printables.com/model/14099-cosplay-calipers/files" target="_blank" rel="noopener noreferrer">Uncle Jessy’s files on Printables</a></dd></div>
-</dl></aside><input type="file" id="file" accept=".stl" hidden><input type="file" id="helmetFile" accept=".stl" hidden></main><script>/*GEOMETRY*/</script><script>/*FIT*/</script><script>/*THREE*/</script><script>/*STUDIO*/</script><script>/*VIEW*/</script><script>/*APP*/</script></body></html>
+</dl></aside><input type="file" id="file" accept=".stl" hidden><input type="file" id="shelfFile" accept=".stl" hidden><input type="file" id="helmetFile" accept=".stl" hidden></main><script>/*GEOMETRY*/</script><script>/*FIT*/</script><script>/*THREE*/</script><script>/*STUDIO*/</script><script>/*VIEW*/</script><script>/*LIBRARY*/</script><script>/*APP*/</script></body></html>

@@ -3,11 +3,12 @@
 # dependencies = []
 # [tool.orcaslicer.plugin]
 # name = "Head Room"
-# version = "0.3.1"
+# version = "0.4.0"
 # description = "Create a personal head, try on a cosplay helmet and open the fitted shell in OrcaSlicer."
 # ///
 import base64
 from contextlib import closing, contextmanager
+import hashlib
 import json
 import math
 import os
@@ -78,6 +79,86 @@ def head_library(folder):
 
 class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
     upload = None
+    shelf_upload = None
+
+    def shelf_action(self, folder, action, data):
+        chunk_size = 384 * 1024
+        with closing(sqlite3.connect(folder / "helmets.sqlite3")) as db, db:
+            db.execute("CREATE TABLE IF NOT EXISTS helmets (id TEXT PRIMARY KEY, name TEXT, size INTEGER, thumb TEXT)")
+            db.execute("CREATE TABLE IF NOT EXISTS parts (id TEXT, offset INTEGER, data BLOB, PRIMARY KEY(id,offset))")
+            db.execute("CREATE TABLE IF NOT EXISTS fits (id TEXT, head TEXT, pose TEXT, PRIMARY KEY(id,head))")
+            if action == "shelfList":
+                return {"items": [dict(id=i, name=n, size=s, thumb=t) for i,n,s,t in db.execute("SELECT * FROM helmets ORDER BY rowid DESC")]}
+            key = data.get("id")
+            if not isinstance(key, str) or not re.fullmatch(r"(?:[0-9a-f]{32}|[0-9a-f]{64})", key):
+                raise ValueError("Invalid helmet ID.")
+            existing = db.execute("SELECT size FROM helmets WHERE id=?", (key,)).fetchone()
+            if action == "shelfBegin":
+                self.clear_shelf_upload()
+                size = data.get("size")
+                if type(size) is not int or not 1 <= size <= MAX_HELMET or (existing and existing[0] != size):
+                    raise ValueError("Invalid helmet size.")
+                if not existing:
+                    self.shelf_upload = tempfile.TemporaryFile(dir=folder)
+                    self.shelf_key, self.shelf_size = key, size
+                return {"exists": bool(existing)}
+            if action == "shelfRead":
+                off = data.get("offset")
+                if not existing or type(off) is not int or off < 0 or off >= existing[0] or off % chunk_size:
+                    raise ValueError("Cannot read this saved helmet.")
+                part = db.execute("SELECT data FROM parts WHERE id=? AND offset=?", (key, off)).fetchone()
+                if not part:
+                    raise ValueError("The saved helmet is incomplete.")
+                pose = None if off else db.execute("SELECT pose FROM fits WHERE id=? AND head=?", (key,data.get("head"))).fetchone()
+                return {"data": base64.b64encode(part[0]).decode("ascii"), "pose": json.loads(pose[0]) if pose else None}
+            if action == "shelfChunk":
+                stream = self.shelf_upload
+                if stream is None or self.shelf_key != key or stream.tell() != data.get("offset"):
+                    raise ValueError("Helmet transfer interrupted.")
+                encoded = data.get("data")
+                if not isinstance(encoded, str) or len(encoded) > 512*1024:
+                    raise ValueError("Invalid helmet chunk.")
+                part = base64.b64decode(encoded, validate=True)
+                if len(part) != min(chunk_size, self.shelf_size-stream.tell()) or not part:
+                    raise ValueError("Incomplete helmet chunk.")
+                stream.write(part)
+                return {}
+            if action != "shelfSave":
+                raise ValueError("Unknown helmet library action.")
+            if not existing:
+                stream = self.shelf_upload
+                if stream is None or self.shelf_key != key or stream.tell() != self.shelf_size:
+                    raise ValueError("Incomplete helmet transfer.")
+                name, thumb = data.get("name"), data.get("thumb")
+                if not isinstance(name,str) or not 1 <= len(name) <= 255 or not isinstance(thumb,str) or len(thumb)>256*1024 or not thumb.startswith("data:image/png;base64,"):
+                    raise ValueError("Invalid helmet details.")
+                stream.seek(0)
+                digest = hashlib.sha256()
+                while part := stream.read(chunk_size):
+                    digest.update(part)
+                    db.execute("INSERT INTO parts VALUES (?,?,?)", (key,stream.tell()-len(part),part))
+                if len(key)==64 and digest.hexdigest()!=key:
+                    raise ValueError("Helmet transfer could not be verified.")
+                db.execute("INSERT INTO helmets VALUES (?,?,?,?)", (key,name,self.shelf_size,thumb))
+            head, pose = data.get("head"), data.get("pose")
+            if head is not None:
+                if not isinstance(head,str) or not isinstance(pose,dict) or not (head=="current" or re.fullmatch(r"[0-9a-f]{32}",head)):
+                    raise ValueError("Invalid fit.")
+                for field, length in [("rotation",9),("offset",3),("scale",3)]:
+                    values = pose.get(field)
+                    if not isinstance(values,list) or len(values)!=length or any(type(n) not in (int,float) or not math.isfinite(n) for n in values):
+                        raise ValueError("Invalid helmet transform.")
+                if any(n<=0 for n in pose["scale"]) or type(pose.get("uniform")) is not bool or type(pose.get("padding")) not in (int,float) or not 0<=pose["padding"]<=100:
+                    raise ValueError("Invalid helmet scale or padding.")
+                db.execute("INSERT OR REPLACE INTO fits VALUES (?,?,?)", (key,head,json.dumps(pose,allow_nan=False)))
+            self.clear_shelf_upload()
+            return {}
+
+    def clear_shelf_upload(self):
+        if self.shelf_upload is not None:
+            self.shelf_upload.close()
+            self.shelf_upload = None
+
 
     def cancel_upload(self):
         if self.upload is not None:
@@ -147,7 +228,14 @@ class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
         try:
             folder = Path(orca.host.plugin.storage())
             action = data.get("type")
-            if action == "load":
+            if isinstance(action,str) and action.startswith("shelf"):
+                try:
+                    result = self.shelf_action(folder, action, data)
+                except (ValueError, OSError, RuntimeError, TypeError, sqlite3.Error) as error:
+                    self.clear_shelf_upload()
+                    result = {"error": str(error)}
+                self.post_message({"type":"shelfReply", "requestId":data.get("requestId"), **result})
+            elif action == "load":
                 with head_library(folder) as db:
                     heads = [{"id": key, "name": name} for key, name in db.execute("SELECT id, name FROM heads ORDER BY rowid DESC")]
                 self.post_message({"type": "loaded", "heads": heads})

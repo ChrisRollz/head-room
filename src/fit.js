@@ -78,22 +78,66 @@ function createHelmetFitting(geometry) {
     });
     return bytes;
   }
-  function crossSection(fit, head, headBytes, axis) {
-    function cut(tri, lines) {
-      const points = [];
-      for (let i=0;i<3;i++) {
-        const a=tri[i], b=tri[(i+1)%3], da=a[axis]-fit.center[axis], db=b[axis]-fit.center[axis];
-        if ((da>0)===(db>0)) continue;
-        const t=da/(da-db); points.push(a.map((v,k)=>v+t*(b[k]-v)));
-      }
-      if(points.length===2) lines.push(points);
+  // Test the plane against source vertices. Only crossing edges need a world transform.
+  function sliceSurface(positions, normal, level, toWorld) {
+    const lines = [], [nx, ny, nz] = normal;
+    function distance(i) {
+      return positions[i]*nx + positions[i+1]*ny + positions[i+2]*nz - level;
     }
-    const headLines=[], shellLines=[];
-    if(headBytes) geometry.readSTL(headBytes,tri=>cut(tri,headLines));
-    else for(const face of head.faces) cut(face.map(i=>head.vertices[i]),headLines);
-    geometry.visitSurface(fit.positions,tri=>cut(tri.map(p=>place(p,fit)),shellLines));
-    return {headLines,shellLines};
+    function intersection(i, j, da, db) {
+      const t = da/(da-db);
+      const p = [0,1,2].map(k => positions[i+k] + t*(positions[j+k]-positions[i+k]));
+      return toWorld ? toWorld(p) : p;
+    }
+    for (let i=0; i<positions.length; i+=9) {
+      const a=distance(i), b=distance(i+3), c=distance(i+6);
+      if ((a>0)===(b>0) && (b>0)===(c>0)) continue;
+      const segment=[];
+      if ((a>0)!==(b>0)) segment.push(intersection(i,i+3,a,b));
+      if ((b>0)!==(c>0)) segment.push(intersection(i+3,i+6,b,c));
+      if ((c>0)!==(a>0)) segment.push(intersection(i+6,i,c,a));
+      lines.push(segment);
+    }
+    return lines;
   }
-  return {start, turn, preview, estimate, fittedSTL, bounds, crossSection};
+  // Combined head and shell limits, relative to the head center, in millimetres.
+  function sliceRange(fit, axis) {
+    const row=fit.rotation.slice(axis*3,axis*3+3);
+    const cache=fit.sliceBounds || (fit.sliceBounds=[]);
+    if(!cache[axis] || row.some((v,i)=>v!==cache[axis].row[i])) {
+      const p=fit.positions, [x,y,z]=row;
+      let lo=Infinity,hi=-Infinity;
+      for(let i=0;i<p.length;i+=3){
+        const value=x*p[i]+y*p[i+1]+z*p[i+2];
+        lo=Math.min(lo,value);hi=Math.max(hi,value);
+      }
+      const origin=row.reduce((v,n,i)=>v+n*fit.origin[i],0);
+      cache[axis]={row,lo:lo-origin,hi:hi-origin};
+    }
+    const {lo,hi}=cache[axis], scale=fit.scale[axis],offset=fit.offset[axis];
+    return [Math.floor(Math.min(fit.headBounds[0][axis]-fit.center[axis],lo*scale+offset)),
+      Math.ceil(Math.max(fit.headBounds[1][axis]-fit.center[axis],hi*scale+offset))];
+  }
+  function crossSection(fit, head, headBytes, axis, plane=fit.center[axis]) {
+    if (fit.cutHead?.mesh!==head || fit.cutHead.bytes!==headBytes) {
+      let positions;
+      if(headBytes) positions=geometry.surface(headBytes);
+      else {
+        positions=new Float32Array(head.faces.length*9);
+        head.faces.forEach((f,i)=>f.forEach((v,j)=>positions.set(head.vertices[v],9*i+3*j)));
+      }
+      fit.cutHead={mesh:head,bytes:headBytes,positions};
+    }
+    const cut=fit.cutHead;
+    if(cut.axis!==axis || cut.plane!==plane) {
+      const normal=[0,0,0]; normal[axis]=1;
+      cut.lines=sliceSurface(cut.positions,normal,plane);
+      cut.axis=axis; cut.plane=plane;
+    }
+    const row=fit.rotation.slice(3*axis,3*axis+3);
+    const level=row.reduce((n,v,i)=>n+v*fit.origin[i],0)+(plane-fit.center[axis]-fit.offset[axis])/fit.scale[axis];
+    return {headLines:cut.lines,shellLines:sliceSurface(fit.positions,row,level,p=>place(p,fit))};
+  }
+  return {start, turn, preview, estimate, fittedSTL, bounds, crossSection, sliceRange};
 }
 if(typeof module!=='undefined'&&module.exports)module.exports=createHelmetFitting;

@@ -1,0 +1,11 @@
+I’d rather find out the visor hits my nose on screen than halfway through a helmet build. That’s why I made Head Room.
+
+Version 0.4.0 is out! Make a reference head from four measurements, move the helmet into place, and slide a cut from crown to jaw to check your clearances. Happy with the fit? Send just the helmet to the OrcaSlicer plate. The new Helmets library remembers how the same shell fits different heads.
+
+Find Head Room on the OrcaSlicer Plugin Hub:
+https://cloud.orcaslicer.com/app/plugins/plugin-hub/47a2a727-e5bd-4a1a-a51e-2cc40e8730f9
+
+#OrcaSlicer #CosplayHelmet #3DPrintedCosplay #PropMaking #CosplayArmor #3DPrinting #YEGMakers
+
+Alt text (image accessibility field):
+Four panels show a generic mannequin with a forehead measuring guide, a translucent cosplay helmet with move and rotate handles, mint head and gold helmet outlines in a side cut, and the fitted green helmet on an OrcaSlicer build plate.

@@ -38,6 +38,17 @@ for(let i=0;i<fit.positions.length;i+=3){
   expected.forEach((v,k)=>close(fullOutput[i+k],v));
 }
 assert.equal(JSON.stringify(head),orig);
+// Compare independently sliced exported geometry to the preview in each plane.
+const exported=fitting.fittedSTL(fit);
+for(let axis=0;axis<3;axis++){
+  const plane=12.75, cut=fitting.crossSection(fit,head,null,axis,plane);
+  const oracle=fitting.crossSection(fitting.start(head,exported),geometry.inspectSTL(exported),exported,axis,plane).headLines;
+  assert(cut.shellLines.length);assert.equal(cut.shellLines.length,oracle.length);
+  cut.shellLines.forEach((line,i)=>line.forEach((point,j)=>point.forEach((v,k)=>close(v,oracle[i][j][k]))));
+  const [min,max]=fitting.sliceRange(fit,axis);
+  assert.equal(fitting.crossSection(fit,head,null,axis,max+fit.center[axis]+1).shellLines.length,0);
+  assert(min<0 && max>plane);
+}
 if(process.argv[2]){
   const bytes=require('node:fs').readFileSync(process.argv[2]);
   const full=fitting.start(geometry.generate(),bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));
