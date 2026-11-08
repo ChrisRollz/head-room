@@ -1,0 +1,25 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Head Room</title>
+<style>
+:root{color-scheme:dark;font:16px/1.45 "DM Sans",system-ui,sans-serif;color:#f2f2ed;background:#151b1f}
+*{box-sizing:border-box}body{margin:0}main{max-width:1440px;margin:auto;padding:clamp(16px,3vw,44px)}
+header{display:flex;align-items:center;gap:13px;margin-bottom:22px}h1{font-size:24px;letter-spacing:-1px;margin:0}
+.mark{width:24px;height:26px;border:3px solid #8edcc5;border-radius:48% 48% 35% 35%;position:relative}
+.mark:after{content:"";height:3px;left:-4px;right:-4px;top:10px;background:#8edcc5;position:absolute}
+section{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(265px,1fr);border:1px solid #475157;border-radius:16px;overflow:hidden;background:#20282d}
+.scene{position:relative;min-height:420px;background:radial-gradient(ellipse at 45% 38%,#303f46,#1a252b 75%)}
+canvas{display:block;width:100%;height:100%;min-height:420px;touch-action:none;cursor:grab}
+.hud{position:absolute;bottom:12px;left:15px;display:flex;align-items:center;gap:10px;font-size:12px;color:#bdc9ca}
+.hud button{padding:5px 10px;font-size:12px}.panel{padding:clamp(18px,3vw,38px);border-left:1px solid #485158;align-self:center}
+h2{font-size:clamp(23px,3vw,34px);line-height:1.13;letter-spacing:-.7px;margin:0 0 12px}
+p{margin:10px 0 18px;color:#c7d1d2}label{display:block;font-weight:600;margin:14px 0 6px}
+input,select,button{font:inherit}input,select{color:#edf4f1;background:#151d20;border:1px solid #829297;border-radius:7px;padding:9px;max-width:100%}input{min-width:0;width:100%}
+input:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid #e8bf78;outline-offset:2px}
+button{border:1px solid #75878a;border-radius:7px;background:#273338;color:#edf3f0;padding:9px 14px;cursor:pointer}
+button.primary{color:#12241f;border-color:#8addbf;background:#8addbf;font-weight:700}button:hover{filter:brightness(1.13)}button:disabled{opacity:.5;cursor:default}
+.actions,.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:15px}.row{flex-wrap:nowrap;margin:0}.step{font-size:13px;color:#91dbbf;margin:0 0 9px}
+.status{color:#f3d8a7;font-size:14px;overflow-wrap:anywhere}.values{font-variant-numeric:tabular-nums;padding:0}.values div{display:flex;justify-content:space-between;border-bottom:1px solid #485158;padding:5px 0}.values dd{margin:0}.hint{font-size:14px}
+@media(max-width:720px){section{grid-template-columns:1fr}.scene,canvas{height:310px;min-height:0}.panel{border:0;border-top:1px solid #485158}}[hidden]{display:none!important}
+</style></head><body><main><header><span class="mark" aria-hidden="true"></span><h1>Head Room</h1></header>
+<section><div class="scene"><canvas id="view" aria-label="Head preview with measurement guides"></canvas><div class="hud"><button type="button" id="resetView">Reset view</button><span>Drag to rotate</span></div></div>
+<div class="panel"><div id="content"></div><p id="status" class="status" role="status"></p></div></section>
+<input type="file" id="file" accept=".stl" hidden></main><script>/*GEOMETRY*/</script><script>/*VIEW*/</script><script>/*APP*/</script></body></html>

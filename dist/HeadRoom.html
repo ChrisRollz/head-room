@@ -1,0 +1,341 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Head Room</title>
+<style>
+:root{color-scheme:dark;font:16px/1.45 "DM Sans",system-ui,sans-serif;color:#f2f2ed;background:#151b1f}
+*{box-sizing:border-box}body{margin:0}main{max-width:1440px;margin:auto;padding:clamp(16px,3vw,44px)}
+header{display:flex;align-items:center;gap:13px;margin-bottom:22px}h1{font-size:24px;letter-spacing:-1px;margin:0}
+.mark{width:24px;height:26px;border:3px solid #8edcc5;border-radius:48% 48% 35% 35%;position:relative}
+.mark:after{content:"";height:3px;left:-4px;right:-4px;top:10px;background:#8edcc5;position:absolute}
+section{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(265px,1fr);border:1px solid #475157;border-radius:16px;overflow:hidden;background:#20282d}
+.scene{position:relative;min-height:420px;background:radial-gradient(ellipse at 45% 38%,#303f46,#1a252b 75%)}
+canvas{display:block;width:100%;height:100%;min-height:420px;touch-action:none;cursor:grab}
+.hud{position:absolute;bottom:12px;left:15px;display:flex;align-items:center;gap:10px;font-size:12px;color:#bdc9ca}
+.hud button{padding:5px 10px;font-size:12px}.panel{padding:clamp(18px,3vw,38px);border-left:1px solid #485158;align-self:center}
+h2{font-size:clamp(23px,3vw,34px);line-height:1.13;letter-spacing:-.7px;margin:0 0 12px}
+p{margin:10px 0 18px;color:#c7d1d2}label{display:block;font-weight:600;margin:14px 0 6px}
+input,select,button{font:inherit}input,select{color:#edf4f1;background:#151d20;border:1px solid #829297;border-radius:7px;padding:9px;max-width:100%}input{min-width:0;width:100%}
+input:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid #e8bf78;outline-offset:2px}
+button{border:1px solid #75878a;border-radius:7px;background:#273338;color:#edf3f0;padding:9px 14px;cursor:pointer}
+button.primary{color:#12241f;border-color:#8addbf;background:#8addbf;font-weight:700}button:hover{filter:brightness(1.13)}button:disabled{opacity:.5;cursor:default}
+.actions,.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:15px}.row{flex-wrap:nowrap;margin:0}.step{font-size:13px;color:#91dbbf;margin:0 0 9px}
+.status{color:#f3d8a7;font-size:14px;overflow-wrap:anywhere}.values{font-variant-numeric:tabular-nums;padding:0}.values div{display:flex;justify-content:space-between;border-bottom:1px solid #485158;padding:5px 0}.values dd{margin:0}.hint{font-size:14px}
+@media(max-width:720px){section{grid-template-columns:1fr}.scene,canvas{height:310px;min-height:0}.panel{border:0;border-top:1px solid #485158}}[hidden]{display:none!important}
+</style></head><body><main><header><span class="mark" aria-hidden="true"></span><h1>Head Room</h1></header>
+<section><div class="scene"><canvas id="view" aria-label="Head preview with measurement guides"></canvas><div class="hud"><button type="button" id="resetView">Reset view</button><span>Drag to rotate</span></div></div>
+<div class="panel"><div id="content"></div><p id="status" class="status" role="status"></p></div></section>
+<input type="file" id="file" accept=".stl" hidden></main><script>/* Original low-detail headform. Coordinates are millimetres, Z up, nose toward -Y. */
+const HeadRoomGeometry = (() => {
+  const slices = 64;
+  const defaults = { circumference: 560, width: 154, length: 194, height: 228 };
+  // Height fraction, half-width fraction, depth fraction, forward shift (fraction of length).
+  const profile = [
+    [0, .12, .12, -.28], [.035,.38,.32,-.23], [.10,.59,.51,-.18],
+    [.17,.71,.67,-.12], [.25,.79,.80,-.07], [.35,.86,.90,-.035],
+    [.45,.92,.96,-.013], [.56,.97,.99,0], [.64,1,1,0],
+    [.72,.99,.99,.008], [.80,.93,.94,.020], [.87,.80,.83,.027],
+    [.93,.61,.64,.031], [.975,.34,.37,.034], [1,0,0,.034]
+  ];
+  function section(t) {
+    const j = profile.findIndex(row => row[0] >= t);
+    if (j <= 0) return profile[0].slice(1);
+    const a = profile[j-1], b = profile[j], q = (t-a[0])/(b[0]-a[0]);
+    return a.slice(1).map((v,k) => v + (b[k+1]-v)*q);
+  }
+  function oval(angle, w, l, exponent) {
+    const c = Math.cos(angle), s = Math.sin(angle);
+    return [w/2*Math.sign(c)*Math.abs(c)**(2/exponent),
+            l/2*Math.sign(s)*Math.abs(s)**(2/exponent)];
+  }
+  function perimeter(w,l,e) {
+    let sum = 0, prev = oval(0,w,l,e);
+    for(let i=1;i<=slices;i++) {
+      const next = oval(i*2*Math.PI/slices,w,l,e);
+      sum += Math.hypot(next[0]-prev[0],next[1]-prev[1]); prev=next;
+    }
+    return sum;
+  }
+  function generate(measured={}) {
+    const c = measured.circumference ?? defaults.circumference, k=c/defaults.circumference;
+    const w=measured.width??defaults.width*k, l=measured.length??defaults.length*k;
+    const h=measured.height??defaults.height*k;
+    let low=1.4, high=3.8;
+    for(let i=0;i<25;i++) {
+      const mid=(low+high)/2;
+      if(perimeter(w,l,mid)<c) low=mid; else high=mid;
+    }
+    const e=(low+high)/2, vertices=[], faces=[];
+    function bump(x,t,cx,ct,wx,wt) {return Math.exp(-(((x-cx)/wx)**2+((t-ct)/wt)**2));}
+    const levels=[...new Set([...Array.from({length:50},(_,i)=>i/50),.64])].sort((a,b)=>a-b);
+    for(const t of levels) {
+      const [sw,sl,shift]=section(t);
+      for(let j=0;j<slices;j++){
+        const a=j*2*Math.PI/slices, [x,y]=oval(a,w*sw,l*sl,e);
+        const xn=x/(w/2), front=Math.max(0,-Math.sin(a))**5;
+        const browFade=Math.max(0,Math.min(1,(.64-t)/.05));
+        const relief= .095*bump(xn,t,0,.385,.21,.069) + .043*bump(xn,t,0,.465,.17,.12)
+          - .048*bump(Math.abs(xn),t,.41,.514,.22,.057)
+          + .019*bump(Math.abs(xn),t,.47,.425,.25,.075)
+          + .022*bump(xn,t,0,.227,.36,.036);
+        const ear=browFade*.034*bump(Math.abs(Math.sin(a)),t,.12,.44,.13,.095);
+        vertices.push([x+Math.sign(x)*w*ear,y+l*(shift-front*browFade*relief),h*t]);
+      }
+    }
+    for(let row=0;row<levels.length-1;row++) for(let j=0;j<slices;j++){
+      const a=row*slices+j,b=row*slices+(j+1)%slices;
+      faces.push([a,b,a+slices],[b,b+slices,a+slices]);
+    }
+    const bottom=vertices.push([0,-.28*l,0])-1, top=vertices.push([0,.034*l,h])-1;
+    const last=(levels.length-1)*slices;
+    for(let j=0;j<slices;j++){const b=(j+1)%slices;faces.push([bottom,b,j],[last+j,last+b,top]);}
+    const z=.64*h;
+    const loop=vertices.slice(levels.indexOf(.64)*slices,(levels.indexOf(.64)+1)*slices);
+    const guides={circumference:[...loop,loop[0]],width:[[-w/2,0,z],[w/2,0,z]],
+      length:[[0,-l/2,z],[0,l/2,z]],height:[[0,-.28*l,0],[0,.034*l,h]]};
+    return {vertices,faces,guides,actual:{circumference:perimeter(w,l,e),width:w,length:l,height:h}};
+  }
+  function binarySTL(mesh) {
+    const data=new ArrayBuffer(84+50*mesh.faces.length), v=new DataView(data);
+    v.setUint32(80,mesh.faces.length,true);
+    mesh.faces.forEach((f,i)=>{
+      const p=f.map(j=>mesh.vertices[j]), a=p[1].map((x,k)=>x-p[0][k]), b=p[2].map((x,k)=>x-p[0][k]);
+      const n=[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+      const mag=Math.hypot(...n)||1;
+      [...n.map(x=>x/mag),...p.flat()].forEach((x,j)=>v.setFloat32(84+50*i+4*j,x,true));
+    });
+    return data;
+  }
+  // Keep full original bytes for export. A bounded sample is only used for drawing imported scans.
+  function inspectSTL(buffer) {
+    const v=new DataView(buffer), n=buffer.byteLength>=84?v.getUint32(80,true):0;
+    const vertices=[],faces=[],mins=[Infinity,Infinity,Infinity],maxs=[-Infinity,-Infinity,-Infinity];
+    function take(p){p.forEach((x,d)=>{if(!Number.isFinite(x))throw Error('Invalid STL coordinate.');
+      mins[d]=Math.min(mins[d],x);maxs[d]=Math.max(maxs[d],x);});}
+    function add(points){const start=vertices.length;vertices.push(...points);faces.push([start,start+1,start+2]);}
+    if(n>0&&84+50*n===buffer.byteLength){
+      const stride=Math.ceil(n/7000);
+      for(let i=0;i<n;i++){
+        const points=Array.from({length:3},(_,j)=>Array.from({length:3},(_,k)=>v.getFloat32(96+50*i+12*j+4*k,true)));
+        points.forEach(take);if(i%stride===0)add(points);
+      }
+    }else{
+      const s=new TextDecoder().decode(buffer);
+      if(!/^\s*solid\b/i.test(s)||!/^\s*endsolid\b/im.test(s))throw Error('Choose a binary or ASCII STL file.');
+      const re=/\bvertex\s+(\S+)\s+(\S+)\s+(\S+)/gi;
+      const count=[...s.matchAll(/\bfacet\s+normal/gi)].length, stride=Math.max(1,Math.ceil(count/7000));
+      let m,tri=[],i=0;
+      while((m=re.exec(s))){const p=m.slice(1).map(Number);take(p);tri.push(p);
+        if(tri.length===3){if(i++%stride===0)add(tri);tri=[];}}
+      if(tri.length||i!==count)throw Error('Incomplete ASCII STL.');
+    }
+    if(!faces.length||maxs.some((v,i)=>v<=mins[i]))throw Error('This STL has no three-dimensional surface.');
+    return {vertices,faces,mins,maxs,guides:{}};
+  }
+  return {defaults,generate,binarySTL,inspectSTL};
+})();
+if(typeof module!=='undefined'&&module.exports)module.exports=HeadRoomGeometry;
+</script><script>function createHeadView(canvas) {
+  const ctx=canvas.getContext('2d');
+  let mesh, guide, yaw=-.38, pitch=.12, center=[0,0,114], extent=275, last=null;
+  const poses={circumference:[-.45,.32],width:[0,.02],length:[1.45,.10],height:[1.33,.04]};
+  function reset(){[yaw,pitch]=poses[guide]||[-.38,.12];draw();}
+  function draw(){
+    if(!mesh)return;
+    const w=canvas.clientWidth,h=canvas.clientHeight, dpr=Math.min(devicePixelRatio||1,2);
+    if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}
+    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+    const scale=Math.min(w*.82,h*.84)/extent, cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+    function project(p){
+      const x=p[0]-center[0],y=p[1]-center[1],z=p[2]-center[2],depth=y*cy+x*sy;
+      return [w/2+(x*cy-y*sy)*scale,h*.49-(z*cp+depth*sp)*scale,depth*cp-z*sp];
+    }
+    function line(points,color,width){
+      ctx.beginPath();points.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke();
+    }
+    const ground=mesh.mins?.[2]??0, unit=extent/10;
+    for(let i=-5;i<=5;i++) for(let axis=0;axis<2;axis++){
+      const p=axis?[i*unit,-5*unit,ground]:[-5*unit,i*unit,ground],q=axis?[i*unit,5*unit,ground]:[5*unit,i*unit,ground];
+      line([p,q].map(a=>project([a[0]+center[0],a[1]+center[1],ground])),'#384950',1);
+    }
+    const points=mesh.vertices.map(project);
+    const faces=mesh.faces.map(f=>{const [a,b,c]=f.map(i=>points[i]);return {a,b,c,z:a[2]+b[2]+c[2]};});
+    faces.sort((a,b)=>b.z-a.z);
+    for(const {a,b,c} of faces){
+      const u=b.map((v,i)=>v-a[i]),v=c.map((p,i)=>p-a[i]);
+      // Camera-space normals account for the different screen and depth units.
+      const nx=(u[1]*v[2]-u[2]*v[1])/scale,ny=(u[2]*v[0]-u[0]*v[2])/scale,nz=(u[0]*v[1]-u[1]*v[0])/(scale*scale);
+      const mag=Math.hypot(nx,ny,nz)||1, shade=Math.min(1,Math.max(.14,.43+(-.28*nx-.50*ny-.55*nz)/mag));
+      const color='rgb('+[64+145*shade,79+137*shade,80+131*shade].map(Math.round).join(',')+')';
+      ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.lineTo(c[0],c[1]);ctx.closePath();
+      ctx.fillStyle=color;ctx.fill();ctx.lineWidth=.55;ctx.strokeStyle=color;ctx.stroke();
+    }
+    const g=mesh.guides?.[guide];if(!g)return;
+    let overlay=g;
+    if(guide==='height'){
+      const y=-mesh.actual.length*.74;overlay=[[0,y,0],[0,y,mesh.actual.height]];
+      for(let i=0;i<2;i++)line([project(g[i]),project(overlay[i])],'#a4c8be',1);
+    }
+    if(guide==='circumference'){
+      const loop=overlay.map(project),mid=loop.reduce((s,p)=>s+p[2],0)/loop.length;
+      for(let i=1;i<loop.length;i++){
+        const back=(loop[i-1][2]+loop[i][2])/2>mid;
+        if(!back||i%3!==0)line([loop[i-1],loop[i]],back?'#b9ab89':'#ffe099',back?1.4:3);
+      }
+    }else line(overlay.map(project),'#ffe099',3);
+    if(overlay.length===2)for(const p of overlay){const [x,y]=project(p);ctx.beginPath();ctx.arc(x,y,4,0,2*Math.PI);ctx.fillStyle='#ffe099';ctx.fill();}
+  }
+  canvas.addEventListener('pointerdown',e=>{last=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);});
+  canvas.addEventListener('pointermove',e=>{if(!last)return;yaw+=(e.clientX-last[0])*.012;pitch=Math.max(-1.2,Math.min(1.2,pitch+(e.clientY-last[1])*.008));last=[e.clientX,e.clientY];draw();});
+  canvas.addEventListener('lostpointercapture',()=>{last=null;});
+  new ResizeObserver(draw).observe(canvas);
+  return {reset,show(m,g,turn=false){mesh=m;guide=g;
+    if(m.mins){center=m.mins.map((v,i)=>(v+m.maxs[i])/2);extent=Math.max(...m.maxs.map((v,i)=>v-m.mins[i]))*1.12;}
+    else{center=[0,0,114];extent=Math.max(275,m.actual.height*1.04,m.actual.length*1.05,m.actual.width*1.05);}
+    if(turn)reset();else draw();
+  }};
+}
+</script><script>(() => {
+  const G=HeadRoomGeometry, $=id=>document.getElementById(id);
+  const view=createHeadView($('view')), panel=$('content'), status=$('status');
+  const steps=[
+    ['circumference','Around your head','Measure around the gold line with a soft tape, just above your eyebrows and ears.'],
+    ['width','Width above your ears','Measure straight across the widest part of your skull above the ears. Use calipers or measure the gap between two parallel books.'],
+    ['length','Brow to back','Measure straight from the brow between your eyebrows to the farthest point at the back of your skull.'],
+    ['height','Chin to crown','Look straight ahead. Measure the vertical distance from the underside of your chin to the top of your head.']
+  ];
+  let saved=null, profile=null, mesh, raw=null, step=0, unit='mm', pending=false;
+  const unitSize={mm:1,cm:10,in:25.4};
+  const native=window.orca&&typeof window.orca.postMessage==='function';
+  function note(message=''){status.textContent=message;}
+  function button(text,fn,primary=false){const b=document.createElement('button');b.textContent=text;if(primary)b.className='primary';b.addEventListener('click',fn);return b;}
+  function buttons(...items){const bar=document.createElement('div');bar.className='actions';bar.append(...items);panel.append(bar);}
+  function field(tag,text){const el=document.createElement(tag);el.textContent=text;panel.append(el);return el;}
+  function base64(buffer){const a=new Uint8Array(buffer);let s='';for(let i=0;i<a.length;i+=16384)s+=String.fromCharCode(...a.subarray(i,i+16384));return btoa(s);}
+  function from64(s){return Uint8Array.from(atob(s),c=>c.charCodeAt(0)).buffer;}
+  function home(){
+    panel.replaceChildren();note();view.show(G.generate(),null,true);
+    field('h2',saved?'Your saved head':'Choose a head');
+    if(saved){field('p',saved.name);buttons(button('Use saved head',()=>openProfile(saved),true));}
+    buttons(button('Make my head',()=>{profile={kind:'measured',name:'My head',values:{}};raw=null;step=0;wizard();},!saved),
+      button('Use my own STL',()=>$('file').click()));
+  }
+  function openProfile(p){
+    try{
+      if(p.kind==='stl'){raw=from64(p.data);mesh=G.inspectSTL(raw);}
+      else{raw=null;mesh=G.generate(p.values);}
+      profile={...p,values:p.values?{...p.values}:undefined};review(true);
+    }catch(e){note('Could not open this profile. '+e.message);}
+  }
+  function parseValue(s){
+    const match=s.trim().match(/^(\d+(?:[.,]\d*)?|[.,]\d+)\s*(mm|cm|in|")?$/i);
+    if(!match)return NaN;
+    return Number(match[1].replace(',','.'))*unitSize[(match[2]==='"'?'in':match[2]?.toLowerCase())||unit];
+  }
+  function wizard(){
+    const [key,title,instruction]=steps[step];panel.replaceChildren();note();
+    const progress=field('p','Measurement '+(step+1)+' of 4');progress.className='step';
+    field('h2',title);field('p',instruction);
+    const label=field('label','Your measurement');label.htmlFor='distance';
+    const row=document.createElement('div');row.className='row';
+    const input=document.createElement('input');input.id='distance';input.inputMode='decimal';input.autocomplete='off';
+    const units=document.createElement('select');units.setAttribute('aria-label','Measurement units');
+    for(const u of Object.keys(unitSize))units.add(new Option(u,u));units.value=unit;
+    function display(){input.value=profile.values[key]===undefined?'':String(Number((profile.values[key]/unitSize[unit]).toFixed(3)));}
+    display();row.append(input,units);panel.append(row);
+    const go=button(step===3?'Review my head':'Next',()=>{if(!update())return;if(step===3)review(false);else{step++;wizard();}},true);
+    function update(){
+      const mm=parseValue(input.value);
+      if(!Number.isFinite(mm)||mm<10||mm>1500){go.disabled=true;note(input.value?'Check the number and units. You can type 58 cm or 22.8 in.':'');return false;}
+      profile.values[key]=mm;mesh=G.generate(profile.values);view.show(mesh,key);go.disabled=false;note();return true;
+    }
+    units.onchange=()=>{const wasEmpty=!input.value.trim();unit=units.value;if(!wasEmpty&&profile.values[key]!==undefined){display();update();}};
+    input.oninput=update;input.onkeydown=e=>{if(e.key==='Enter'&&!go.disabled)go.click();};
+    buttons(button('Back',()=>{if(step===0)home();else{step--;wizard();}}),go);
+    go.disabled=profile.values[key]===undefined;
+    mesh=G.generate(profile.values);view.show(mesh,key,true);input.focus();
+  }
+  function exportMesh(){
+    try{
+      const bytes=raw||G.binarySTL(mesh);
+      if(native){window.orca.postMessage({type:'export',data:base64(bytes)});return;}
+      const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
+      const a=document.createElement('a');a.href=url;a.download='head-room.stl';a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);
+    }catch(e){note(e.message);}
+  }
+  let dbPromise;
+  function browserStore(mode,callback){
+    if(!dbPromise)dbPromise=new Promise((resolve,reject)=>{const r=indexedDB.open('head-room',1);
+      r.onupgradeneeded=()=>r.result.createObjectStore('profiles');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+    return dbPromise.then(db=>new Promise((resolve,reject)=>{const t=db.transaction('profiles',mode),r=callback(t.objectStore('profiles'));
+      t.oncomplete=()=>resolve(r.result);t.onabort=()=>reject(t.error||Error('Local storage is unavailable.'));}));
+  }
+  function save(){
+    profile.name=$('headName').value.trim()||'My head';
+    if(pending)return;pending=true;panel.querySelectorAll('input,button').forEach(el=>el.disabled=true);
+    try{
+      if(native)window.orca.postMessage({type:'save',profile});
+      else browserStore('readwrite',s=>s.put(profile,'current')).then(()=>savedOK()).catch(failed);
+    }catch(e){failed(e);}
+  }
+  function savedOK(){pending=false;saved=structuredCopy(profile);review(true);note('Saved on this device.');}
+  function failed(e){pending=false;if($('save'))panel.querySelectorAll('input,button').forEach(el=>el.disabled=false);note(String(e.message||e));}
+  function structuredCopy(p){return {...p,...(p.values?{values:{...p.values}}:{})};}
+  function review(isSaved){
+    panel.replaceChildren();note();view.show(mesh,null,true);field('h2',isSaved?profile.name:'Review your head');
+    if(profile.kind==='measured'){
+      const list=document.createElement('dl');list.className='values';
+      for(const [key,title] of steps){const d=document.createElement('div'),t=document.createElement('dt'),v=document.createElement('dd');
+        t.textContent=title;v.textContent=Number(mesh.actual[key].toFixed(1))+' mm';d.append(t,v);list.append(d);}
+      panel.append(list);
+      if(Math.abs(mesh.actual.circumference-profile.values.circumference)>1)
+        field('p','You entered '+Number(profile.values.circumference.toFixed(1))+' mm around the brow. This head shape reaches '+mesh.actual.circumference.toFixed(1)+' mm at the entered width and length.').className='hint';
+    }else{const size=mesh.maxs.map((v,i)=>(v-mesh.mins[i]).toFixed(1));field('p','STL dimensions (X × Y × Z) '+size.join(' × ')+' mm. Coordinates are interpreted in millimetres.');}
+    if(isSaved){
+      buttons(button('Export head STL',exportMesh,true),button('Back to heads',home));return;
+    }
+    const l=field('label','Head name');l.htmlFor='headName';const name=document.createElement('input');name.id='headName';name.maxLength=80;name.value=profile.name;panel.append(name);
+    const b=button(saved?'Replace saved head':'Save my head',save,true);b.id='save';
+    buttons(button('Back',()=>{if(profile.kind==='measured'){step=3;wizard();}else home();}),b);
+  }
+  $('file').onchange=async e=>{
+    const f=e.target.files[0];e.target.value='';if(!f)return;
+    try{
+      if(f.size>32*1024*1024)throw Error('Choose an STL smaller than 32 MiB for this first build.');
+      note('Reading STL…');const bytes=await f.arrayBuffer();const m=G.inspectSTL(bytes);
+      mesh=m;raw=bytes;profile={kind:'stl',name:f.name.replace(/\.stl$/i,''),data:base64(bytes)};review(false);
+    }catch(err){note(err.message);}
+  };
+  $('resetView').onclick=()=>view.reset();
+  if(native){
+    window.orca.onMessage(msg=>{
+      if(msg.type==='loaded'){saved=msg.profile;home();}
+      if(msg.type==='saved')savedOK();
+      if(msg.type==='exported')note('STL saved to '+msg.path);
+      if(msg.type==='error')failed(Error(msg.message));
+    });
+    home();window.orca.postMessage({type:'load'});
+  }else{home();browserStore('readonly',s=>s.get('current')).then(p=>{if(!profile){saved=p||null;home();}else saved=p||null;}).catch(failed);}
+})();
+</script></body></html>
+
+<!--
+MIT License
+
+Copyright (c) 2026 Head Room contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
