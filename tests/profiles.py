@@ -3,6 +3,7 @@ import base64
 import json
 from pathlib import Path
 import runpy
+import struct
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -39,6 +40,28 @@ class HeadLibraryTest(unittest.TestCase):
         for key, head in [('current', self.measured), ('1'*32, self.scan), ('2'*32, self.measured)]:
             self.assertEqual(self.send('getHead', id=key)['profile'], head)
         self.assertEqual(json.loads(legacy.read_text()), self.measured)
+
+    def test_fitted_file_survives_interrupted_transfer_and_denied_launch(self):
+        data = bytes(80) + struct.pack('<I', 1) + bytes(50)
+        filename = 'Workshop-fitted.stl'
+        output = self.folder / filename
+        output.write_bytes(b'previous')
+        self.send('helmetBegin', name=filename, size=len(data))
+        self.assertEqual(self.send('helmetChunk', offset=17, data='AAAA')['type'], 'error')
+        self.assertEqual(output.read_bytes(), b'previous')
+        for denied in [True, False]:
+            self.assertEqual(self.send('helmetBegin', name=filename, size=len(data))['offset'], 0)
+            for offset in [0, 80]:
+                part = data[offset:80] if offset == 0 else data[offset:]
+                answer = self.send('helmetChunk', offset=offset, data=base64.b64encode(part).decode())
+                self.assertEqual(answer['offset'], offset + len(part))
+            with patch.object(sys, 'platform', 'darwin'), patch('subprocess.run', side_effect=PermissionError if denied else None) as launch:
+                answer = self.send('helmetOpen')
+                launch.assert_called_once_with(['/usr/bin/open', '-b', 'com.orcaslicer.OrcaSlicer', str(output)], check=True, timeout=15)
+            self.assertEqual(answer['type'], 'helmetResult')
+            self.assertEqual(answer.get('path'), str(output) if denied else None)
+            self.assertEqual(output.read_bytes(), data)
+        self.assertEqual(list(self.folder.iterdir()), [output])
 
 
 if __name__ == '__main__':

@@ -3,7 +3,7 @@
 # dependencies = []
 # [tool.orcaslicer.plugin]
 # name = "Head Room"
-# version = "0.3.0"
+# version = "0.3.1"
 # description = "Create a personal head, try on a cosplay helmet and open the fitted shell in OrcaSlicer."
 # ///
 import base64
@@ -132,10 +132,10 @@ class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
                 if not executable:
                     raise OSError("Could not locate the OrcaSlicer application.")
                 subprocess.Popen([executable, str(self.output)])
-            message = "Sent the fitted helmet to OrcaSlicer. Open Prepare to check the plate."
-        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-            message = f"OrcaSlicer could not open the fitted helmet ({error}). You can open the completed STL at {self.output}"
-        self.post_message({"type": "helmetResult", "message": message})
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            self.post_message({"type": "helmetResult", "message": "The fitted STL is ready. Open this file in OrcaSlicer.", "path": str(self.output)})
+        else:
+            self.post_message({"type": "helmetResult", "message": "Sent the fitted helmet to OrcaSlicer. Open Prepare to check the plate."})
 
     def get_name(self):
         return "Head Room"
