@@ -7,7 +7,7 @@
     ['length','Brow to back','Measure straight from the brow between your eyebrows to the farthest point at the back of your skull.'],
     ['height','Chin to crown','Look straight ahead. Measure the vertical distance from the underside of your chin to the top of your head.']
   ];
-  let saved=null, profile=null, mesh, raw=null, step=0, unit='mm', pending=false;
+  let heads=[], selectedId=null, saved=null, draftId=null, profile=null, mesh, raw=null, step=0, unit='mm', pending=false;
   const unitSize={mm:1,cm:10,in:25.4};
   const native=window.orca&&typeof window.orca.postMessage==='function';
   const fitter=createHelmetFitting(G);
@@ -26,14 +26,35 @@
   function field(tag,text){const el=document.createElement(tag);el.textContent=text;panel.append(el);return el;}
   function base64(buffer){const a=new Uint8Array(buffer);let s='';for(let i=0;i<a.length;i+=16384)s+=String.fromCharCode(...a.subarray(i,i+16384));return btoa(s);}
   function from64(s){return Uint8Array.from(atob(s),c=>c.charCodeAt(0)).buffer;}
+  function selectHead(id){
+    selectedId=id;saved=null;note();
+    $('useHead').disabled=true;view.show(G.generate(),null,true);
+    if(native)window.orca.postMessage({type:'getHead',id});
+    else browserRead('profiles',store=>store.get(id)).then(p=>headLoaded(id,p)).catch(failed);
+  }
+  function headLoaded(id,p){
+    if(id!==selectedId||!$('useHead'))return;
+    try{
+      const preview=p.kind==='stl'?G.inspectSTL(from64(p.data)):G.generate(p.values);
+      view.show(preview,null,true);saved=p;$('useHead').disabled=false;
+    }catch(err){note('Could not open this saved head. '+err.message);}
+  }
   function home(){
     panel.replaceChildren();tools.hidden=false;fit=null;note();
-    let preview=G.generate(saved?.kind==='measured'?saved.values:{});
-    if(saved?.kind==='stl'){try{preview=G.inspectSTL(from64(saved.data));}catch(err){note(err.message);}}
-    view.show(preview,null,true);
-    field('h2',saved?'Your saved head':'Choose a head');
-    if(saved){field('p',saved.name);buttons(button('Use saved head',()=>openProfile(saved),true));}
-    buttons(button('Make my head',()=>{profile={kind:'measured',name:'My head',values:{}};raw=null;step=0;wizard();},!saved),
+    field('h2',heads.length?'Your saved heads':'Choose a head');
+    if(heads.length){
+      const label=field('label','Saved head'), picker=document.createElement('select');label.htmlFor=picker.id='headPicker';
+      const counts=new Map(), labels=new Map();
+      for(const h of [...heads].reverse()){
+        const n=(counts.get(h.name)||0)+1;counts.set(h.name,n);
+        labels.set(h.id,n===1?h.name:h.name+' ('+n+')');
+      }
+      for(const h of heads)picker.add(new Option(labels.get(h.id),h.id));
+      picker.value=heads.some(h=>h.id===selectedId)?selectedId:heads[0].id;
+      panel.append(picker);const use=button('Use saved head',()=>openProfile(saved),true);use.id='useHead';buttons(use);
+      picker.onchange=()=>selectHead(picker.value);selectHead(picker.value);
+    }else view.show(G.generate(),null,true);
+    buttons(button('Make my head',()=>{draftId=null;profile={kind:'measured',name:'My head',values:{}};raw=null;step=0;wizard();},!heads.length),
       button('Use my own STL',()=>$('file').click()));
   }
   function openProfile(p){
@@ -81,21 +102,55 @@
     }catch(e){note(e.message);}
   }
   let dbPromise;
-  function browserStore(mode,callback){
-    if(!dbPromise)dbPromise=new Promise((resolve,reject)=>{const r=indexedDB.open('head-room',1);
-      r.onupgradeneeded=()=>r.result.createObjectStore('profiles');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
-    return dbPromise.then(db=>new Promise((resolve,reject)=>{const t=db.transaction('profiles',mode),r=callback(t.objectStore('profiles'));
-      t.oncomplete=()=>resolve(r.result);t.onabort=()=>reject(t.error||Error('Local storage is unavailable.'));}));
+  function browserDB(){
+    if(!dbPromise)dbPromise=new Promise((resolve,reject)=>{
+      const r=indexedDB.open('head-room',2);
+      r.onupgradeneeded=()=>{
+        const db=r.result, profiles=db.objectStoreNames.contains('profiles')?r.transaction.objectStore('profiles'):db.createObjectStore('profiles');
+        const names=db.createObjectStore('headNames',{keyPath:'id'});
+        const old=profiles.get('current');
+        old.onsuccess=()=>{if(old.result)names.add({id:'current',name:old.result.name,created:0});};
+      };
+      r.onsuccess=()=>{const db=r.result;db.onversionchange=()=>db.close();resolve(db);};
+      r.onerror=()=>{dbPromise=null;reject(r.error);};
+    });
+    return dbPromise;
+  }
+  async function browserRead(table,query){
+    const db=await browserDB();
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction(table),r=query(tx.objectStore(table));
+      tx.oncomplete=()=>resolve(r.result);tx.onabort=()=>reject(tx.error);
+    });
+  }
+  async function browserSave(id,head){
+    const db=await browserDB();
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction(['profiles','headNames'],'readwrite'), profiles=tx.objectStore('profiles');
+      const existing=profiles.get(id);
+      existing.onsuccess=()=>{
+        if(existing.result){if(JSON.stringify(existing.result)!==JSON.stringify(head))tx.abort();return;}
+        profiles.add(head,id);
+        tx.objectStore('headNames').add({id,name:head.name,created:Date.now()});
+      };
+      tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error||Error('Could not add this head.'));
+    });
   }
   function save(){
     profile.name=$('headName').value.trim()||'My head';
     if(pending)return;pending=true;panel.querySelectorAll('input,button').forEach(el=>el.disabled=true);
     try{
-      if(native)window.orca.postMessage({type:'save',profile});
-      else browserStore('readwrite',s=>s.put(profile,'current')).then(()=>savedOK()).catch(failed);
+      if(!draftId)draftId=Array.from(crypto.getRandomValues(new Uint8Array(16)),v=>v.toString(16).padStart(2,'0')).join('');
+      if(native)window.orca.postMessage({type:'save',id:draftId,profile});
+      else browserSave(draftId,profile).then(()=>savedOK(draftId)).catch(failed);
     }catch(e){failed(e);}
   }
-  function savedOK(){pending=false;saved=structuredCopy(profile);tryOn();note('Saved on this device.');}
+  function savedOK(id){
+    if(!pending||id!==draftId)return;
+    pending=false;selectedId=id;saved=structuredCopy(profile);
+    if(!heads.some(h=>h.id===id))heads.unshift({id,name:saved.name});
+    tryOn();note('Added to your saved heads.');
+  }
   function failed(e){pending=false;transfer=null;if($('save')||fit)panel.querySelectorAll('input,select,button').forEach(el=>el.disabled=false);note(String(e.message||e));}
   function structuredCopy(p){return {...p,...(p.values?{values:{...p.values}}:{})};}
   function review(isSaved){
@@ -112,7 +167,7 @@
       buttons(button('Try on a helmet',tryOn,true),button('Export head STL',exportMesh),button('Back to heads',home));return;
     }
     const l=field('label','Head name');l.htmlFor='headName';const name=document.createElement('input');name.id='headName';name.maxLength=80;name.value=profile.name;panel.append(name);
-    const b=button(saved?'Replace saved head':'Save my head',save,true);b.id='save';
+    const b=button('Add to saved heads',save,true);b.id='save';
     buttons(button('Back',()=>{if(profile.kind==='measured'){step=3;wizard();}else home();}),b);
   }
   $('file').onchange=async e=>{
@@ -120,7 +175,7 @@
     try{
       if(f.size>32*1024*1024)throw Error('Choose an STL smaller than 32 MiB for this first build.');
       note('Reading STL…');const bytes=await f.arrayBuffer();const m=G.inspectSTL(bytes);
-      mesh=m;raw=bytes;profile={kind:'stl',name:f.name.replace(/\.stl$/i,''),data:base64(bytes)};review(false);
+      mesh=m;raw=bytes;draftId=null;profile={kind:'stl',name:f.name.replace(/\.stl$/i,''),data:base64(bytes)};review(false);
     }catch(err){note(err.message);}
   };
   function tryOn(){
@@ -209,13 +264,14 @@
   $('resetView').onclick=()=>view.reset();
   if(native){
     window.orca.onMessage(msg=>{
-      if(msg.type==='loaded'){saved=msg.profile;home();}
-      if(msg.type==='saved')savedOK();
+      if(msg.type==='loaded'){heads=msg.heads;home();}
+      if(msg.type==='head')headLoaded(msg.id,msg.profile);
+      if(msg.type==='saved')savedOK(msg.id);
       if(msg.type==='exported')note('STL saved to '+msg.path);
       if(msg.type==='helmetReady')nextChunk(msg.offset);
       if(msg.type==='helmetResult'){transfer=null;fitPanel();note(msg.message);}
       if(msg.type==='error')failed(Error(msg.message));
     });
-    home();window.orca.postMessage({type:'load'});
-  }else{home();browserStore('readonly',s=>s.get('current')).then(p=>{if(!profile){saved=p||null;home();}else saved=p||null;}).catch(failed);}
+    window.orca.postMessage({type:'load'});
+  }else browserRead('headNames',s=>s.getAll()).then(items=>{heads=items.sort((a,b)=>b.created-a.created);home();}).catch(failed);
 })();

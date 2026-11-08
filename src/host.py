@@ -3,15 +3,17 @@
 # dependencies = []
 # [tool.orcaslicer.plugin]
 # name = "Head Room"
-# version = "0.2.0"
+# version = "0.2.1"
 # description = "Create a personal head, try on a cosplay helmet and open the fitted shell in OrcaSlicer."
 # ///
 import base64
+from contextlib import closing, contextmanager
 import json
 import math
 import os
 import re
 import shutil
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -61,6 +63,17 @@ def write_atomic(path, data):
             os.replace(temp_path, path)
         finally:
             temp_path.unlink(missing_ok=True)
+
+
+@contextmanager
+def head_library(folder):
+    with closing(sqlite3.connect(folder / "heads.sqlite3")) as db, db:
+        db.execute("CREATE TABLE IF NOT EXISTS heads (id TEXT PRIMARY KEY, name TEXT NOT NULL, profile TEXT NOT NULL)")
+        legacy = folder / "head.json"
+        if legacy.is_file() and db.execute("SELECT 1 FROM heads WHERE id = 'current'").fetchone() is None:
+            head = validate_profile(json.loads(legacy.read_text("utf-8")))
+            db.execute("INSERT OR IGNORE INTO heads VALUES ('current', ?, ?)", (head["name"], json.dumps(head)))
+        yield db
 
 
 class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
@@ -133,15 +146,28 @@ class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
     def on_message(self, data):
         try:
             folder = Path(orca.host.plugin.storage())
-            path = folder / "head.json"
             action = data.get("type")
             if action == "load":
-                profile = validate_profile(json.loads(path.read_text("utf-8"))) if path.exists() else None
-                self.post_message({"type": "loaded", "profile": profile})
+                with head_library(folder) as db:
+                    heads = [{"id": key, "name": name} for key, name in db.execute("SELECT id, name FROM heads ORDER BY rowid DESC")]
+                self.post_message({"type": "loaded", "heads": heads})
+            elif action == "getHead":
+                with head_library(folder) as db:
+                    row = db.execute("SELECT profile FROM heads WHERE id = ?", (data.get("id"),)).fetchone()
+                if row is None:
+                    raise ValueError("That saved head could not be found.")
+                self.post_message({"type": "head", "id": data["id"], "profile": json.loads(row[0])})
             elif action == "save":
-                profile = validate_profile(data.get("profile"))
-                write_atomic(path, json.dumps(profile, allow_nan=False).encode())
-                self.post_message({"type": "saved"})
+                key = data.get("id")
+                if not isinstance(key, str) or not re.fullmatch(r"[0-9a-f]{32}", key):
+                    raise ValueError("Invalid head ID.")
+                head = validate_profile(data.get("profile"))
+                payload = json.dumps(head, sort_keys=True, allow_nan=False)
+                with head_library(folder) as db:
+                    added = db.execute("INSERT OR IGNORE INTO heads VALUES (?, ?, ?)", (key, head["name"], payload))
+                    if not added.rowcount and db.execute("SELECT profile FROM heads WHERE id = ?", (key,)).fetchone()[0] != payload:
+                        raise ValueError("A different head already uses this ID.")
+                self.post_message({"type": "saved", "id": key})
             elif action == "export":
                 stl = folder / "head-room.stl"
                 write_atomic(stl, decode_mesh(data.get("data")))
@@ -152,7 +178,7 @@ class HeadRoomPage(orca.pages.PagesPluginCapabilityBase):
                 self.append_chunk(data)
             elif action == "helmetOpen":
                 self.open_helmet()
-        except (ValueError, OSError, RuntimeError, TypeError) as error:
+        except (ValueError, OSError, RuntimeError, TypeError, sqlite3.Error) as error:
             if data.get("type") in ("helmetBegin", "helmetChunk", "helmetOpen"):
                 self.cancel_upload()
             self.post_message({"type": "error", "message": str(error)})
