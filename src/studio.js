@@ -49,17 +49,17 @@ function createFitStudio(canvas,onPose,onPad){
   new ResizeObserver(draw).observe(canvas);orbit.addEventListener('change',draw);gizmo.addEventListener('change',draw);
   gizmo.addEventListener('dragging-changed',e=>{orbit.enabled=!e.value;});
   const R=new T.Matrix4(),S=new T.Matrix4(),V=new T.Vector3();
-  function apply(){const f=active;if(!f)return;
+  function apply(){const f=active;if(!f||!shell)return;
     const [a,b,c,d,e,g,h,i,j]=f.rotation;
     R.set(a,b,c,0,d,e,g,0,h,i,j,0,0,0,0,1);
     pivot.quaternion.setFromRotationMatrix(R);pivot.position.fromArray(f.center).add(V.fromArray(f.offset));
     shell.matrix.copy(R).premultiply(S.makeScale(...f.scale)).setPosition(pivot.position);shell.matrixWorldNeedsUpdate=true;depthShell.matrix.copy(shell.matrix);depthShell.matrixWorldNeedsUpdate=true;draw();
   }
-  gizmo.addEventListener('objectChange',()=>{if(!active)return;
+  gizmo.addEventListener('objectChange',()=>{if(!active||!shell)return;
     const r=R.makeRotationFromQuaternion(pivot.quaternion).elements;
     active.rotation=[r[0],r[4],r[8],r[1],r[5],r[9],r[2],r[6],r[10]];
     active.offset=pivot.position.toArray().map((v,i)=>v-active.center[i]);apply();onPose();});
-  function tool(mode){if(mode==='orbit')gizmo.detach();
+  function tool(mode){if(mode==='orbit'||!shell)gizmo.detach();
     else{gizmo.setMode(mode);gizmo.attach(pivot);}draw();}
   function reset(){if(!active)return;const c=active.center;
     orbit.target.fromArray(c);cam.position.fromArray(c).add(V.set(.53,-1,.27).normalize().multiplyScalar(span*3));
@@ -67,20 +67,28 @@ function createFitStudio(canvas,onPose,onPad){
   function geometry(pos){const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(pos,3));g.computeVertexNormals();return g;}
   function stop(){clearOverlays();gizmo.detach();active=null;for(const m of [skull,shell])if(m){scene.remove(m);m.geometry.dispose();}
     if(depthShell)scene.remove(depthShell);skull=shell=depthShell=null;orbit.enabled=true;}
-  function start(f,head,headBytes){stop();active=f;
+  function headGeometry(head,headBytes){
     let geom;
     if(headBytes)geom=geometry(HeadRoomGeometry.surface(headBytes));
     else{geom=new T.BufferGeometry();geom.setAttribute('position',new T.Float32BufferAttribute(head.vertices.flat(),3));geom.setIndex(head.faces.flat());geom.computeVertexNormals();}
-    skull=new T.Mesh(geom,headMat);
+    return geom;
+  }
+  function radius(pos,origin){let r2=0;for(let i=0;i<pos.length;i+=3)r2=Math.max(r2,(pos[i]-origin[0])**2+(pos[i+1]-origin[1])**2+(pos[i+2]-origin[2])**2);return Math.sqrt(r2);}
+  function showHead(head,headBytes){
+    stop();active={center:head.mins.map((v,i)=>(v+head.maxs[i])/2)};
+    skull=new T.Mesh(headGeometry(head,headBytes),headMat);scene.add(skull);
+    span=2.23*radius(skull.geometry.attributes.position.array,active.center);reset();
+  }
+  function start(f,head,headBytes){stop();active=f;
+    skull=new T.Mesh(headGeometry(head,headBytes),headMat);
     // Keep the full source coordinate array immutable for sections and export.
-    geom=geometry(f.positions.slice());geom.translate(...f.origin.map(v=>-v));
+    const geom=geometry(f.positions.slice());geom.translate(...f.origin.map(v=>-v));
     shell=new T.Mesh(geom,shellMat);shell.matrixAutoUpdate=false;shell.renderOrder=1;scene.add(skull,shell);
     depthShell=new T.Mesh(geom,depthMat);depthShell.matrixAutoUpdate=false;depthShell.renderOrder=.5;scene.add(depthShell);
-    function radius(pos,origin){let r2=0;for(let i=0;i<pos.length;i+=3)r2=Math.max(r2,(pos[i]-origin[0])**2+(pos[i+1]-origin[1])**2+(pos[i+2]-origin[2])**2);return Math.sqrt(r2);}
     span=2.23*Math.max(radius(geom.attributes.position.array,[0,0,0]),radius(skull.geometry.attributes.position.array,f.center));
     apply();reset();tool('orbit');}
   function opacity(v){if(depthShell)depthShell.visible=v>0&&v<1;shellMat.opacity=v;shellMat.transparent=v<1;shellMat.depthWrite=v>=1;shellMat.needsUpdate=true;draw();}
-  return {start,apply,tool,reset,stop,opacity,draw,overlays};
+  return {start,showHead,apply,tool,reset,stop,opacity,draw,overlays};
 }
 
 // Render each library portrait from the wearer's mesh, even when WebGL is unavailable.
@@ -89,14 +97,18 @@ function headPortrait(profile,G,decode){
   return meshPortrait(raw?G.inspectSTL(raw):G.generate(profile.values),G,raw);
 }
 function meshPortrait(mesh,G,raw=null,helmet=false){
-  const W=240,H=200,c=document.createElement('canvas');c.width=W;c.height=H;
+  return meshRaster(mesh,G,raw,helmet).toDataURL();
+}
+// Full-surface software fallback shared with library portraits; never sample disconnected faces.
+function meshRaster(mesh,G,raw=null,helmet=false,W=240,H=200,project=null,screenScale=null){
+  const c=document.createElement('canvas');c.width=W;c.height=H;
   const ctx=c.getContext('2d'),img=ctx.createImageData(W,H),depth=new Float32Array(W*H).fill(Infinity);
   const [lo,hi]=createHelmetFitting(G).bounds(mesh),ctr=lo.map((v,i)=>(v+hi[i])/2);
-  const k=H*.83/Math.max(...hi.map((v,i)=>v-lo[i])),yaw=-.48,cy=Math.cos(yaw),sy=Math.sin(yaw);
+  const k=screenScale??H*.83/Math.max(...hi.map((v,i)=>v-lo[i])),yaw=-.48,cy=Math.cos(yaw),sy=Math.sin(yaw);
   function proj(p){const x=p[0]-ctr[0],y=p[1]-ctr[1],z=p[2]-ctr[2],d=x*sy+y*cy;
     return [W/2+k*(x*cy-y*sy),H*.5-k*(z*.993+d*.12),d*.993-z*.12];}
   function tri(points){
-    const [a,b,c]=points.map(proj),ux=b[0]-a[0],uy=b[1]-a[1],uz=(b[2]-a[2])*k,vx=c[0]-a[0],vy=c[1]-a[1],vz=(c[2]-a[2])*k;
+    const [a,b,c]=points.map(project||proj),ux=b[0]-a[0],uy=b[1]-a[1],uz=(b[2]-a[2])*k,vx=c[0]-a[0],vy=c[1]-a[1],vz=(c[2]-a[2])*k;
     const nz=ux*vy-uy*vx;if(Math.abs(nz)<.00001)return;
     const nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,light=Math.max(0,(nx*.35+ny*.55+nz*.66)*Math.sign(nz)/(Math.hypot(nx,ny,nz)||1));
     const rgb=helmet?[146+101*light,119+99*light,79+89*light]:[99+123*light,135+99*light,132+92*light];
@@ -108,5 +120,5 @@ function meshPortrait(mesh,G,raw=null,helmet=false){
       }}
   }
   if(raw)G.readSTL(raw,tri);else mesh.faces.forEach(f=>tri(f.map(i=>mesh.vertices[i])));
-  ctx.putImageData(img,0,0);return c.toDataURL();
+  ctx.putImageData(img,0,0);return c;
 }

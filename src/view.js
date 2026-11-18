@@ -1,6 +1,6 @@
 function createHeadView(canvas, moveHelmet) {
   const ctx=canvas.getContext('2d');
-  let mesh, guide, section=null, yaw=-.38, pitch=.12, center=[0,0,114], extent=275, headExtent=275, last=null,zoom=1,pan=[0,0],panning=false;
+  let mesh, guide, importedBytes=null, section=null, yaw=-.38, pitch=.12, center=[0,0,114], extent=275, headExtent=275, last=null,zoom=1,pan=[0,0],panning=false;
   // Horizontal and upward screen directions in model coordinates, for X/Y/Z-normal cuts.
   const planes=[{right:1,sign:-1,up:2},{right:0,sign:1,up:2},{right:0,sign:1,up:1}];
   function pixelsPerMM(){return Math.min(canvas.clientWidth*.82,canvas.clientHeight*.84)*zoom/extent;}
@@ -55,6 +55,11 @@ function createHeadView(canvas, moveHelmet) {
       const p=axis?[i*unit,-5*unit,ground]:[-5*unit,i*unit,ground],q=axis?[i*unit,5*unit,ground]:[5*unit,i*unit,ground];
       line([p,q].map(a=>project([a[0]+center[0],a[1]+center[1],ground])),'#384950',1);
     }
+    if(importedBytes){
+      const ratio=Math.min(1,800/Math.max(w,h));
+      const raster=meshRaster(mesh,HeadRoomGeometry,importedBytes,false,Math.round(w*ratio),Math.round(h*ratio),p=>{const q=project(p);return [q[0]*ratio,q[1]*ratio,q[2]];},scale*ratio);
+      ctx.drawImage(raster,0,0,w,h);return;
+    }
     const points=mesh.vertices.map(project);
     const faces=mesh.faces.map(f=>{const [a,b,c]=f.map(i=>points[i]);return {a,b,c,z:a[2]+b[2]+c[2]};});
     faces.sort((a,b)=>b.z-a.z);
@@ -108,7 +113,7 @@ function createHeadView(canvas, moveHelmet) {
     canvas.setAttribute('aria-label','Helmet cut view. Drag to move the helmet or use the arrow keys to nudge by one millimetre.');
     extent=headExtent*1.4;
     if(previous!==section?.axis)reset();else draw();
-  },show(m,g,turn=false){mesh=m;guide=g;section=null;canvas.removeAttribute('tabindex');
+  },show(m,g,turn=false,bytes=null){mesh=m;guide=g;importedBytes=bytes;section=null;canvas.removeAttribute('tabindex');
     canvas.setAttribute('aria-label','Head preview with measurement guides');
     if(m.mins){center=m.mins.map((v,i)=>(v+m.maxs[i])/2);extent=Math.max(...m.maxs.map((v,i)=>v-m.mins[i]))*1.12;}
     else{center=[0,0,m.actual.height/2];extent=Math.max(m.actual.height*1.08,m.actual.length*1.12,m.actual.width*1.12);}

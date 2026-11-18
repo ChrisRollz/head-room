@@ -117,6 +117,8 @@ const HeadRoomGeometry = (() => {
     return count;
   }
   function inspectSTL(buffer) {
+    // Validate every face and retain a bounded sample for inspection only. Render imported
+    // surfaces from the original bytes (surface/readSTL), never from these sampled faces.
     const vertices=[],faces=[],mins=[Infinity,Infinity,Infinity],maxs=[-Infinity,-Infinity,-Infinity];
     const count=readSTL(buffer,(points,i,n)=>{
       for(const p of points)for(let d=0;d<3;d++){

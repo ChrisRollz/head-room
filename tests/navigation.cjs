@@ -232,9 +232,9 @@ async function legacyLibrary(page) {
 (async()=>{
   const browser=await chromium.launch({executablePath:process.env.CHROME_BIN||(process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':undefined),headless:true,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
   try {
-    for(const test of [walkthrough,helmetShelf,versionsAndBackup,fallback,legacyLibrary]) {
+    for(const test of [walkthrough,helmetShelf,versionsAndBackup,fallback,legacyLibrary].filter(test=>!process.env.HEAD_ROOM_TESTS||process.env.HEAD_ROOM_TESTS.split(',').includes(test.name))) {
       const page=await browser.newPage({viewport:{width:1200,height:770}}),errors=[];
-      page.setDefaultTimeout(7000);page.on('pageerror',error=>errors.push(error.message));
+      page.setDefaultTimeout(Number(process.env.HEAD_ROOM_TEST_TIMEOUT)||7000);page.on('pageerror',error=>errors.push(error.message));
       await test(page);assert.deepEqual(errors,[]);await page.context().close();console.log('Passed '+test.name);
     }
   } finally {await browser.close();}

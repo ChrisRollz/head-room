@@ -2,7 +2,7 @@
 
 # Head Room for OrcaSlicer
 
-Create a personal reference head and try on cosplay helmets in OrcaSlicer. Head Room 0.5.0 keeps a library of measured heads and imported head scans. Each save adds a separate head, even when two have the same name. An existing head from 0.1.0 or 0.2.0 appears in the portrait library after the update.
+Create a personal reference head and try on cosplay helmets in OrcaSlicer. Head Room 0.5.1 keeps a library of measured heads and imported head scans. Each save adds a separate head, even when two have the same name. An existing head from 0.1.0 or 0.2.0 appears in the portrait library after the update.
 
 ## Install
 
@@ -24,11 +24,15 @@ Local and Cloud installations have separate head libraries. Update the installat
 
 The first four measurements stay the same. At review, choose **Refine visor and ear fit** for crown-to-eye height, pupil distance, back-of-head to nose tip, and separate left and right ear stand-off. Each is optional. The cyan markers show eye position; if only one eye measurement was supplied the other dimension is estimated. For an existing measured head, choose its portrait and **Modify head**. The wizard reopens with saved values; **Save head revision** adds a new profile and preserves earlier heads and their fits. For a scan, **Make measured copy** starts a separate editable reference.
 
+Imported scans display their complete surface during review, helmet selection, and fitting. Drag to orbit, scroll to zoom, and Shift-drag or middle-drag to pan. The source scan stays unchanged. Computers without WebGL use a complete software-rendered head preview and the cut views for fitting.
+
 ## Back up your library
 
 From the heads screen, **Library backup → Back up library** includes the measurements, head scans, original shells and named fits in one local `.headroom` file. In Orca choose **Show backup file** and copy it somewhere outside plugin storage; the browser downloads the archive. **Restore backup…** checks the archive and adds missing items without replacing existing files. Restoring the same archive twice does not duplicate items. Cloud and local installs otherwise maintain separate libraries. No wearer data goes online.
 
 ## Build
+
+The dense-head regression is `node tests/imported-head.cjs [optional-local-head.stl]` (requires Playwright and Chrome). It checks every preview triangle, the software fallback, saved-head reopening, unchanged scan export, and resuming a helmet fit. With no file, it generates its own dense fixture; personal scans are never committed.
 
 Run `python3 build.py` to regenerate the preview and plugin. Run `node tests/geometry.cjs` and `node tests/fit.cjs` for the geometry and STL checks. Run `python3 tests/profiles.py` to check migration and preservation of same-name heads. You may pass a local high-detail helmet STL to `tests/fit.cjs` to verify that export preserves every triangle. On macOS with Chrome, run `node tests/viewport.cjs /path/to/helmet.stl` to exercise actual mouse gestures, stable framing, opacity and the full triangle count in an isolated profile. On other platforms set `CHROME_BIN` to the browser executable. With Playwright and Chrome installed, run `node tests/navigation.cjs` to test the guide, library, imported heads, fit changes, downloads, and handoff recovery. The Orca Cloud upload and icon are in `dist/cloud/`.
 

@@ -3,7 +3,7 @@
 # dependencies = []
 # [tool.orcaslicer.plugin]
 # name = "Head Room"
-# version = "0.5.0"
+# version = "0.5.1"
 # description = "Create a personal head, try on a cosplay helmet and open the fitted shell in OrcaSlicer."
 # ///
 import base64

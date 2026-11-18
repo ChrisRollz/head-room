@@ -1,3 +1,5 @@
+0.5.1 Fix incomplete imported-head previews. Head scans now display their complete surface during review and helmet selection, with orbit, zoom and pan. Saved heads and measurements are preserved.
+
 0.5.0 Preview foam and check local clearance before scaling. Save named helmet fit versions, modify measured heads with optional visor and ear measurements, back up your library, and print a test band from a top cut.
 
 0.4.0 Browse your locally saved helmets by thumbnail and reopen a separate fit for each head. Move the helmet directly in front, side, and top cut views. Sweep the slice through the shell to check clearances, or use the arrow keys for 1 mm adjustments. Reset the helmet to its original alignment and scale, with one-click undo.

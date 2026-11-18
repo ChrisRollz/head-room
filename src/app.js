@@ -272,8 +272,24 @@
     note(String(e.message||e));
   }
   function structuredCopy(p){return {...p,...(p.values?{values:{...p.values}}:{})};}
+  function getStudio(){
+    return studio??=createFitStudio($('surface'),()=>{syncOffsets();const rows=padding?padInfo():[];syncPads(rows);studio.overlays(rows,highlightZone,mesh.eyes);if(proposal){proposal=null;$('applyScale')?.remove();}if(selectedVersion&&$('versionBadge'))$('versionBadge').textContent=selectedVersion.name+' · '+selectedVersion.version+(samePose()?'':' · modified');},inspectPad);
+  }
+  function showHead(){
+    if(raw){
+      $('surface').hidden=false;$('view').hidden=true;
+      // Also initialize the full software fallback and cut-view bounds, without drawing a hidden canvas.
+      view.show(mesh,null,true,raw);surfaceFit=null;
+      try{getStudio().showHead(mesh,raw);studioOK=true;
+        $('surface').setAttribute('aria-label','Imported head preview. Drag to orbit, scroll to zoom, Shift-drag or middle-drag to pan.');
+        document.querySelector('.hud span').textContent='Scroll to zoom · Shift-drag or middle-drag to pan';return;
+      }catch(error){console.warn('3D head view unavailable',error);studio?.stop();studioOK=false;}
+      $('surface').hidden=true;$('view').hidden=false;
+    }
+    view.show(mesh,null,true,raw);
+  }
   function review(isSaved){
-    layout('editor');tools.hidden=true;panel.replaceChildren();note();view.show(mesh,null,true);field('h2',isSaved?profile.name:'Review your head');
+    layout('editor');tools.hidden=true;panel.replaceChildren();note();showHead();field('h2',isSaved?profile.name:'Review your head');
     if(profile.kind==='measured'){
       const list=document.createElement('dl');list.className='values';
       for(const [key,title] of [...steps,...extra]){if(profile.values[key]==null)continue;const d=document.createElement('div'),t=document.createElement('dt'),v=document.createElement('dd');
@@ -316,7 +332,7 @@
   }
   function tryOn(){
     layout('editor');tools.hidden=true;
-    panel.replaceChildren();note();view.show(mesh,null,true);
+    panel.replaceChildren();note();showHead();
     field('p',profile.name).className='step';field('h2','Try on a helmet');
     if(fit){
       field('p',helmetName).className='current-shell';
@@ -438,9 +454,13 @@
     selectedVersion=revision;highlightZone=null;proposal=null;padSurface=null;currentRows=[];
     if(padding>0)fit.padAnchors??=Clearances.anchors(fit);
     saveFingerprint=JSON.stringify(poseNow());
-    try{studio??=createFitStudio($('surface'),()=>{syncOffsets();const rows=padding?padInfo():[];syncPads(rows);studio.overlays(rows,highlightZone,mesh.eyes);if(proposal){proposal=null;$('applyScale')?.remove();}if(selectedVersion&&$('versionBadge'))$('versionBadge').textContent=selectedVersion.name+' · '+selectedVersion.version+(samePose()?'':' · modified');},inspectPad);studio.start(fit,mesh,raw);studio.opacity(opacity);surfaceFit=fit;studioOK=true;}
-    catch(error){console.warn('3D view unavailable',error);studio?.stop();surfaceFit=null;studioOK=false;}
+    showFitSurface();
     sectionMode=studioOK?'3D':'Front section';fitPanel();
+  }
+  function showFitSurface(){
+    try{getStudio().start(fit,mesh,raw);studio.opacity(opacity);surfaceFit=fit;studioOK=true;
+      $('surface').setAttribute('aria-label','Helmet fitting preview. Drag to orbit or use the move and rotate handles.');}
+    catch(error){console.warn('3D view unavailable',error);studio?.stop();surfaceFit=null;studioOK=false;}
   }
   $('helmetFile').onchange=e=>{
     const file=e.target.files[0];e.target.value='';loadHelmet(file);
@@ -577,6 +597,8 @@
       button(native?'Open test ring in OrcaSlicer':'Download test ring STL',()=>{try{sendSTL(G.binarySTL(load()),exportStem()+'-entry-ring-fitted.stl');}catch(e){read.textContent=e.message;}}),read);panel.append(wrap);
   }
   function fitPanel(){
+    if(surfaceFit!==fit&&studioOK)showFitSurface();
+    if(!studioOK&&sectionMode==='3D')sectionMode='Front section';
     layout('fit');panel.replaceChildren();note();
     panel.dataset.helmetDrop='true';
     field('p',profile.name+'  /  '+helmetName.replace(/\.stl$/i,'')).className='step';
